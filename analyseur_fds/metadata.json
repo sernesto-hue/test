@@ -1,0 +1,6 @@
+{
+  "name": "Analyseur FDS et DUERP",
+  "description": "Analyseur intelligent de Fiches de Données de Sécurité (FDS) et de Documents Uniques. Évaluation statistique bayésienne des expositions chimiques (VLEP, INRS Biotox, Metropol) et ergonomique (ISO 11228).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
