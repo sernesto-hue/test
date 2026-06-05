@@ -45,239 +45,34 @@ import { motion, AnimatePresence } from "motion/react";
 import { ChemicalAgent, Workstation, ISO11228Params, ISO11228Result, ISO11228_3Params, ISO11228_3Result, BayesianAnalysisResult, HealthSurveillanceReport, EnterpriseSheet, ComplianceStatus } from "./types";
 import { calculateISO11228, calculateISO11228_3, runBayesianExposureSimulation } from "./utils";
 
-// Static Demo Environments for instant execution
-const DEMO_WORKSTATIONS: Workstation[] = [
-  {
-    id: "composite_strat",
-    name: "Atelier Stratification Polyester",
-    jobTitle: "Stratifieur / Opérateur de Moulage au Contact",
-    situation: "Moulage au contact de coques composites (résine ester + renforts de fibre)",
-    chemicals: [
-      {
-        name: "Styrène (Monomère)",
-        cas: "100-42-5",
-        percentage: "35-40%",
-        hPhrases: ["H226", "H315", "H319", "H332", "H361d", "H372"],
-        pictograms: ["GHS02", "GHS07", "GHS08"],
-        vlep8h: 100,
-        vlep15min: 200,
-        unit: "mg/m³",
-        biotoxInfo: {
-          indicator: "Somme de l'acide mandélique et acide phénylglyoxylique urinaires",
-          samplingTime: "Fin de poste de fin de semaine",
-          limitValue: "600 mg/g créatinine (Recommandation INRS Biotox)",
-          category: "Neurotoxique et oto-toxique (auditif)"
-        },
-        metropolInfo: {
-          methodNumber: "Métropol M-103",
-          samplingSupport: "Tube de charbon actif de prélèvement",
-          device: "CPG-FID"
-        }
-      },
-      {
-        name: "Acétone",
-        cas: "67-64-1",
-        percentage: "10-20% (Nettoyage outils)",
-        hPhrases: ["H225", "H319", "H336"],
-        pictograms: ["GHS02", "GHS07"],
-        vlep8h: 1210,
-        vlep15min: 2420,
-        unit: "mg/m³",
-        biotoxInfo: {
-          indicator: "Acétone urinaire",
-          samplingTime: "Fin de poste",
-          limitValue: "50 mg/L (INRS Biotox)",
-          category: "Solvant d'exposition courante"
-        },
-        metropolInfo: {
-          methodNumber: "Métropol M-103",
-          samplingSupport: "Badge passif ou tube charbon",
-          device: "CPG-FID"
-        }
-      }
-    ],
-    physicalStrains: {
-      liftingHandled: true,
-      repetitiveWork: true,
-      pushPullHandled: false,
-      liftingParams: {
-        actualWeight: 18,
-        durationHours: 3,
-        verticalPosition: 40,
-        horizontalDistance: 35,
-        verticalDistance: 60,
-        asymmetryAngle: 30,
-        frequency: 1.5,
-        coupling: "fair",
-        genderReference: "recommended"
-      },
-      repetitiveParams: {
-        technicalActionsPerMin: 40,
-        forceBorgScale: 3,
-        postureScore: "moderate",
-        recoveryDeficitHours: 2,
-        additionalFactors: "few",
-        durationHours: 4
-      }
-    }
-  },
-  {
-    id: "peinture_cabine",
-    name: "Cabine de Peinture Liquide",
-    jobTitle: "Peintre Industriel / Applicateur de Laque",
-    situation: "Application au pistolet pneumatique d'apprêts et de laques solvantées",
-    chemicals: [
-      {
-        name: "Toluène",
-        cas: "108-88-3",
-        percentage: "10-15%",
-        hPhrases: ["H225", "H315", "H336", "H361d", "H304", "H373"],
-        pictograms: ["GHS02", "GHS07", "GHS08"],
-        vlep8h: 192,
-        vlep15min: 384,
-        unit: "mg/m³",
-        biotoxInfo: {
-          indicator: "Toluène sanguin ou urinaire / Acide hippurique urinaire",
-          samplingTime: "Fin de poste",
-          limitValue: "Fin de poste - Toluène urinaire: 0.03 mg/L",
-          category: "Neurotoxique / Altération cérébrale"
-        },
-        metropolInfo: {
-          methodNumber: "Métropol M-103",
-          samplingSupport: "Tube charbon actif",
-          device: "CPG-FID"
-        }
-      },
-      {
-        name: "Xylène (Mélange)",
-        cas: "1330-20-7",
-        percentage: "20-25%",
-        hPhrases: ["H226", "H312", "H332", "H315"],
-        pictograms: ["GHS02", "GHS07"],
-        vlep8h: 221,
-        vlep15min: 442,
-        unit: "mg/m³",
-        biotoxInfo: {
-          indicator: "Acides méthylhippuriques urinaires",
-          samplingTime: "Fin de poste",
-          limitValue: "1.5 g/g créatinine (Indicateur biologique)",
-          category: "Solvant organique volatil"
-        },
-        metropolInfo: {
-          methodNumber: "Métropol M-103",
-          samplingSupport: "Badge ou tube charbon",
-          device: "CPG-FID"
-        }
-      }
-    ],
-    physicalStrains: {
-      liftingHandled: false,
-      repetitiveWork: true,
-      pushPullHandled: false,
-      liftingParams: {
-        actualWeight: 5,
-        durationHours: 2,
-        verticalPosition: 75,
-        horizontalDistance: 25,
-        verticalDistance: 30,
-        asymmetryAngle: 0,
-        frequency: 0.5,
-        coupling: "good",
-        genderReference: "recommended"
-      },
-      repetitiveParams: {
-        technicalActionsPerMin: 50,
-        forceBorgScale: 2,
-        postureScore: "moderate",
-        recoveryDeficitHours: 0,
-        additionalFactors: "few",
-        durationHours: 6
-      }
-    }
-  },
-  {
-    id: "metallerie_decap",
-    name: "Sablage et Décapage Métallique",
-    jobTitle: "Sableur / Décapeur Métallique — Technicien Anticorrosion",
-    situation: "Nettoyage par sablage abrasif de fers anciens revêtus de minium de plomb",
-    chemicals: [
-      {
-        name: "Plomb et ses composés",
-        cas: "7439-92-1",
-        percentage: "Traces de minium décapé",
-        hPhrases: ["H360FD", "H372", "H351"],
-        pictograms: ["GHS08"],
-        vlep8h: 0.1,
-        vlep15min: 0,
-        unit: "mg/m³",
-        biotoxInfo: {
-          indicator: "Plombémie sanguine (Plomb total dans le sang)",
-          samplingTime: "Visite médicale périodique",
-          limitValue: "Hommes: 200 µg/L | Femmes (procréation): 70 µg/L (Réglementaire FR)",
-          category: "Effet toxique cumulatif sanguin et neurologique"
-        },
-        metropolInfo: {
-          methodNumber: "Métropol M-003",
-          samplingSupport: "Filtre ester de cellulose (fraction inhalable)",
-          device: "ICP-AES ou AAS"
-        }
-      },
-      {
-        name: "Silice Cristalline (Quartz)",
-        cas: "14808-60-7",
-        percentage: "Dérivé du sable abrasif",
-        hPhrases: ["H372", "H350"],
-        pictograms: ["GHS08"],
-        vlep8h: 0.1,
-        vlep15min: 0,
-        unit: "mg/m³",
-        biotoxInfo: {
-          indicator: "Absence de biomarqueur urinaire de routine - Évaluation pulmonaire par EFR + Radio",
-          samplingTime: "Suivi renforcé périodique",
-          limitValue: "Contrôle spirométrique récurrent annuel",
-          category: "Altération irréversible des alvéoles pulmonaires (Silicose)"
-        },
-        metropolInfo: {
-          methodNumber: "Métropol M-259",
-          samplingSupport: "Filtre PVC avec cyclone de tri d'alvéoles",
-          device: "Diffraction de rayons X (DRX) ou IRTF"
-        }
-      }
-    ],
-    physicalStrains: {
-      liftingHandled: true,
-      repetitiveWork: true,
-      pushPullHandled: true,
-      liftingParams: {
-        actualWeight: 25,
-        durationHours: 4,
-        verticalPosition: 30,
-        horizontalDistance: 45,
-        verticalDistance: 90,
-        asymmetryAngle: 15,
-        frequency: 3,
-        coupling: "poor",
-        genderReference: "male"
-      },
-      repetitiveParams: {
-        technicalActionsPerMin: 30,
-        forceBorgScale: 6,
-        postureScore: "severe",
-        recoveryDeficitHours: 3,
-        additionalFactors: "multiple",
-        durationHours: 5
-      }
-    }
-  }
-];
+const EMPTY_LIFTING_PARAMS: ISO11228Params = {
+  actualWeight: 0,
+  durationHours: 0,
+  verticalPosition: 75,
+  horizontalDistance: 30,
+  verticalDistance: 50,
+  asymmetryAngle: 0,
+  frequency: 0,
+  coupling: "fair",
+  genderReference: "recommended",
+};
+
+const EMPTY_REPETITIVE_PARAMS: ISO11228_3Params = {
+  technicalActionsPerMin: 0,
+  forceBorgScale: 0,
+  postureScore: "optimal",
+  recoveryDeficitHours: 0,
+  additionalFactors: "none",
+  durationHours: 0,
+};
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<"fe" | "import" | "bayesian" | "iso11228" | "report">("fe");
   const [ergoSubTab, setErgoSubTab] = useState<"lifting" | "repetitive">("lifting");
   
   // App data state
-  const [workstations, setWorkstations] = useState<Workstation[]>(DEMO_WORKSTATIONS);
-  const [selectedWorkstationId, setSelectedWorkstationId] = useState<string>("composite_strat");
+  const [workstations, setWorkstations] = useState<Workstation[]>([]);
+  const [selectedWorkstationId, setSelectedWorkstationId] = useState<string>("");
   
   // Input fields for Custom Analysis
   const [pastedText, setPastedText] = useState("");
@@ -287,29 +82,23 @@ export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState("");
 
-  // Bayesian inputs for each CAS and chemical
-  const [bayesChemicalId, setBayesChemicalId] = useState<string>(" styrène "); // links to chemical selection
-  const [selectedChemical, setSelectedChemical] = useState<ChemicalAgent | null>(DEMO_WORKSTATIONS[0].chemicals[0]);
-  const [rawMeasurements, setRawMeasurements] = useState<string>("45.2, 112.4, 88.0, 134.5, 62.1");
-  const [vlepOverride, setVlepOverride] = useState<number>(100);
+  // Bayesian inputs
+  const [selectedChemical, setSelectedChemical] = useState<ChemicalAgent | null>(null);
+  const [rawMeasurements, setRawMeasurements] = useState<string>("");
+  const [vlepOverride, setVlepOverride] = useState<number | "">("");
   const [unitOverride, setUnitOverride] = useState<string>("mg/m³");
-  
+  const [inrsLoading, setInrsLoading] = useState(false);
+  const [inrsSuggestion, setInrsSuggestion] = useState<string>("");
+
   // Real-time calculated results for Bayesian Exposure
   const [bayesianResult, setBayesianResult] = useState<BayesianAnalysisResult | null>(null);
 
-  // ISO 11228 Inputs
-  const [isoParams, setIsoParams] = useState<ISO11228Params>(DEMO_WORKSTATIONS[0].physicalStrains.liftingParams!);
+  // ISO 11228 Inputs — vides par défaut, l'utilisateur saisit les vraies valeurs
+  const [isoParams, setIsoParams] = useState<ISO11228Params>(EMPTY_LIFTING_PARAMS);
   const [isoResult, setIsoResult] = useState<ISO11228Result | null>(null);
 
-  // ISO 11228-3 Inputs (Repetitive Work / OCRA)
-  const [repetitiveParams, setRepetitiveParams] = useState<ISO11228_3Params>({
-    technicalActionsPerMin: 40,
-    forceBorgScale: 3,
-    postureScore: "moderate",
-    recoveryDeficitHours: 2,
-    additionalFactors: "few",
-    durationHours: 4
-  });
+  // ISO 11228-3 Inputs
+  const [repetitiveParams, setRepetitiveParams] = useState<ISO11228_3Params>(EMPTY_REPETITIVE_PARAMS);
   const [repetitiveResult, setRepetitiveResult] = useState<ISO11228_3Result | null>(null);
 
   // Enterprise Sheet state
@@ -329,74 +118,90 @@ export default function App() {
   const activeWorkstation = workstations.find(w => w.id === selectedWorkstationId) || workstations[0];
 
   useEffect(() => {
-    // When active workstation changes, synchronize chemical selections and ISO parameters
+    // Sync uniquement les données factuelles issues du document importé
     if (activeWorkstation) {
+      // Sélectionner le premier agent chimique si présent
       if (activeWorkstation.chemicals.length > 0) {
         const chem = activeWorkstation.chemicals[0];
         setSelectedChemical(chem);
-        setVlepOverride(chem.vlep8h);
-        setUnitOverride(chem.unit);
-        
-        // Populate representative simulation concentrations based on chemical
-        if (chem.cas === "100-42-5") {
-          setRawMeasurements("45.2, 112.4, 88.0, 134.5, 62.1");
-        } else if (chem.cas === "67-64-1") {
-          setRawMeasurements("150.0, 310.5, 420.0, 240.2, 185.0");
-        } else if (chem.cas === "108-88-3") {
-          setRawMeasurements("15.2, 28.4, 42.1, 19.5, 30.2");
-        } else if (chem.cas === "1330-20-7") {
-          setRawMeasurements("34.1, 48.0, 72.3, 53.0, 68.2");
-        } else if (chem.cas === "7439-92-1") { // lead
-          setRawMeasurements("0.02, 0.05, 0.09, 0.04, 0.06");
-        } else if (chem.cas === "14808-60-7") { // quartz
-          setRawMeasurements("0.04, 0.11, 0.18, 0.09, 0.07");
-        } else {
-          setRawMeasurements("0.1, 0.4, 0.5, 0.2");
-        }
+        setVlepOverride(chem.vlep8h || "");
+        setUnitOverride(chem.unit || "mg/m³");
+      } else {
+        setSelectedChemical(null);
+        setVlepOverride("");
       }
-      
-      if (activeWorkstation.physicalStrains.liftingParams) {
-        setIsoParams(activeWorkstation.physicalStrains.liftingParams);
-      }
-      if (activeWorkstation.physicalStrains.repetitiveParams) {
-        setRepetitiveParams(activeWorkstation.physicalStrains.repetitiveParams);
-      }
+      // Mesures : toujours vides — l'utilisateur saisit ses vraies valeurs de prélèvement
+      setRawMeasurements("");
+      setInrsSuggestion("");
+      // Paramètres ergonomiques : uniquement si explicitement extraits du document
+      setIsoParams(activeWorkstation.physicalStrains.liftingParams ?? EMPTY_LIFTING_PARAMS);
+      setRepetitiveParams(activeWorkstation.physicalStrains.repetitiveParams ?? EMPTY_REPETITIVE_PARAMS);
     }
   }, [selectedWorkstationId]);
 
-  // Recalculate Bayesian Statistics on simulation inputs change
+  // Calcul bayésien uniquement si des mesures réelles ont été saisies
   useEffect(() => {
-    if (selectedChemical) {
-      const numbers = rawMeasurements
-        .split(",")
-        .map(x => parseFloat(x.trim()))
-        .filter(x => !isNaN(x) && x > 0);
-      
+    const numbers = rawMeasurements
+      .split(",")
+      .map(x => parseFloat(x.trim()))
+      .filter(x => !isNaN(x) && x > 0);
+
+    if (selectedChemical && numbers.length >= 1 && vlepOverride && Number(vlepOverride) > 0) {
       const res = runBayesianExposureSimulation(
         selectedChemical.name,
-        vlepOverride || 1,
+        Number(vlepOverride),
         unitOverride || "mg/m³",
         numbers
       );
       setBayesianResult(res);
+    } else {
+      setBayesianResult(null);
     }
   }, [selectedChemical, rawMeasurements, vlepOverride, unitOverride]);
 
-  // Recalculate ISO 11228 values on params change
+  // Calcul ISO 11228-1 uniquement si la masse et la durée sont renseignées
   useEffect(() => {
-    if (isoParams) {
-      const res = calculateISO11228(isoParams);
-      setIsoResult(res);
+    if (isoParams.actualWeight > 0 && isoParams.durationHours > 0) {
+      setIsoResult(calculateISO11228(isoParams));
+    } else {
+      setIsoResult(null);
     }
   }, [isoParams]);
 
-  // Recalculate ISO 11228-3 values on repetitive params change
+  // Calcul OCRA uniquement si la fréquence et la durée sont renseignées
   useEffect(() => {
-    if (repetitiveParams) {
-      const res = calculateISO11228_3(repetitiveParams);
-      setRepetitiveResult(res);
+    if (repetitiveParams.technicalActionsPerMin > 0 && repetitiveParams.durationHours > 0) {
+      setRepetitiveResult(calculateISO11228_3(repetitiveParams));
+    } else {
+      setRepetitiveResult(null);
     }
   }, [repetitiveParams]);
+
+  // Consulter l'INRS pour des valeurs de référence sur ce type de poste/produit
+  const handleInrsLookup = async () => {
+    if (!selectedChemical && !activeWorkstation) return;
+    setInrsLoading(true);
+    setInrsSuggestion("");
+    try {
+      const response = await fetch("/api/inrs-lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chemicalName: selectedChemical?.name || "",
+          cas: selectedChemical?.cas || "",
+          jobTitle: activeWorkstation?.jobTitle || "",
+          situation: activeWorkstation?.situation || "",
+        }),
+      });
+      if (!response.ok) throw new Error("Erreur serveur");
+      const data = await response.json();
+      setInrsSuggestion(data.suggestion || "");
+    } catch {
+      setInrsSuggestion("Impossible de contacter le service INRS.");
+    } finally {
+      setInrsLoading(false);
+    }
+  };
 
   // Handle Drag & Drop / File inputs
   const handleFileDrop = (e: React.DragEvent<HTMLDivElement>) => {
@@ -684,18 +489,22 @@ Manutention manuelle détectée: Manipulation quotidienne de fûts de peinture d
           
           <div className="hidden md:block w-px h-6 bg-white/10"></div>
           
-          {/* Workstation selector styled beautifully */}
+          {/* Workstation selector */}
           <div className="flex items-center gap-2 bg-[#151921] px-3 py-1.5 rounded-lg border border-white/10 shadow-inner">
-            <span className="text-[9px] text-slate-400 font-mono uppercase tracking-wider pl-1 font-semibold">Active Atmos :</span>
-            <select
-              value={selectedWorkstationId}
-              onChange={(e) => setSelectedWorkstationId(e.target.value)}
-              className="bg-transparent border-none text-xs font-semibold text-blue-400 focus:outline-none cursor-pointer pr-1"
-            >
-              {workstations.map(w => (
-                <option key={w.id} value={w.id} className="bg-[#151921] text-slate-200">{w.name}</option>
-              ))}
-            </select>
+            <span className="text-[9px] text-slate-400 font-mono uppercase tracking-wider pl-1 font-semibold">Poste actif :</span>
+            {workstations.length === 0 ? (
+              <span className="text-xs text-slate-500 italic font-mono">Aucun poste importé</span>
+            ) : (
+              <select
+                value={selectedWorkstationId}
+                onChange={(e) => setSelectedWorkstationId(e.target.value)}
+                className="bg-transparent border-none text-xs font-semibold text-blue-400 focus:outline-none cursor-pointer pr-1"
+              >
+                {workstations.map(w => (
+                  <option key={w.id} value={w.id} className="bg-[#151921] text-slate-200">{w.name}</option>
+                ))}
+              </select>
+            )}
           </div>
 
           <div className="hidden sm:flex items-center gap-2">
@@ -1311,38 +1120,62 @@ Manutention manuelle détectée: Manipulation quotidienne de fûts de peinture d
                     </select>
                   </div>
 
+                  {/* Bouton consultation INRS */}
+                  <div className="flex justify-end">
+                    <button
+                      onClick={handleInrsLookup}
+                      disabled={inrsLoading || (!selectedChemical && !activeWorkstation)}
+                      className="text-[10px] font-bold font-mono uppercase tracking-wider text-violet-400 bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/20 py-1.5 px-3 rounded transition cursor-pointer flex items-center gap-1.5 disabled:opacity-40"
+                    >
+                      {inrsLoading ? <RefreshCw className="w-3 h-3 animate-spin" /> : <BookOpen className="w-3 h-3" />}
+                      Consulter références INRS
+                    </button>
+                  </div>
+                  {inrsSuggestion && (
+                    <div className="p-3 bg-violet-500/5 border border-violet-500/20 rounded-lg text-[11px] text-slate-300 leading-relaxed">
+                      <p className="text-[9px] font-bold text-violet-400 font-mono uppercase mb-1.5">Références INRS (indicatif — à vérifier sur inrs.fr)</p>
+                      <p>{inrsSuggestion}</p>
+                    </div>
+                  )}
+
                   {/* Range measurements input */}
-                  <div className="space-y-1.5 animate-pulse-once">
+                  <div className="space-y-1.5">
                     <label className="text-[9px] font-bold text-slate-400 font-mono flex justify-between uppercase tracking-wider">
-                      <span>Concentrations d'exposition observées ({unitOverride})</span>
+                      <span>Mesures de prélèvement réelles ({unitOverride})</span>
                       <span className="text-slate-500">Séparées par virgules</span>
                     </label>
                     <input
                       type="text"
                       value={rawMeasurements}
                       onChange={(e) => setRawMeasurements(e.target.value)}
-                      className="w-full bg-[#0F1117] border border-white/10 rounded-lg p-3 text-xs focus:outline-none focus:border-blue-500 font-mono text-slate-200"
+                      placeholder="Saisir vos valeurs mesurées : ex. 45.2, 88.0, 112.4"
+                      className="w-full bg-[#0F1117] border border-white/10 rounded-lg p-3 text-xs focus:outline-none focus:border-blue-500 font-mono text-slate-200 placeholder-slate-600"
                     />
+                    {!rawMeasurements.trim() && (
+                      <p className="text-[10px] text-amber-500/80 font-mono">⚠ Aucune mesure saisie — saisir les résultats de prélèvement de la campagne de métrologie.</p>
+                    )}
                     <p className="text-[10px] text-slate-500 font-light">
-                      Chaque valeur représente un relevé d'exposition (ex. badge actif individuel sur 8h).
+                      Valeurs issues de prélèvements individuels sur 8h (badges ou tubes). Minimum 1 valeur pour lancer le calcul.
                     </p>
                   </div>
 
-                  {/* VLEP 8h slider limit */}
+                  {/* VLEP 8h — saisie libre */}
                   <div className="space-y-1.5 pt-2">
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="text-[9px] font-bold text-slate-400 font-mono uppercase tracking-wider">Valeur Limite VLEP-8h ({unitOverride})</span>
-                      <span className="font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded font-bold">{vlepOverride}</span>
-                    </div>
+                    <label className="text-[9px] font-bold text-slate-400 font-mono uppercase tracking-wider">
+                      VLEP-8h réglementaire ({unitOverride}) — saisir la valeur INRS/document
+                    </label>
                     <input
-                      type="range"
-                      min={0.01}
-                      max={vlepOverride > 100 ? vlepOverride * 2 : 250}
-                      step={vlepOverride > 100 ? 5 : 0.1}
+                      type="number"
+                      min={0}
+                      step="any"
                       value={vlepOverride}
-                      onChange={(e) => setVlepOverride(parseFloat(e.target.value))}
-                      className="w-full h-1.5 bg-[#0F1117] rounded-lg appearance-none cursor-pointer accent-blue-500"
+                      onChange={(e) => setVlepOverride(e.target.value === "" ? "" : parseFloat(e.target.value))}
+                      placeholder="Ex : 100 (mg/m³) — à saisir depuis le document ou l'INRS"
+                      className="w-full bg-[#0F1117] border border-white/10 rounded-lg p-2.5 text-xs font-mono text-slate-200 focus:outline-none focus:border-blue-500"
                     />
+                    {!vlepOverride && (
+                      <p className="text-[10px] text-amber-500/80 font-mono">⚠ VLEP non renseignée — le calcul ne se lancera pas.</p>
+                    )}
                   </div>
 
                 </div>

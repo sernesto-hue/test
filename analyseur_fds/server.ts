@@ -387,26 +387,21 @@ Vous DEVEZ répondre STRICTEMENT sous la forme d'un objet JSON respectant le for
         }
       ],
       "physicalStrains": {
-        "liftingHandled": true_ou_false,
-        "repetitiveWork": true_ou_false,
+        "liftingHandled": true_ou_false, // true UNIQUEMENT si le document mentionne explicitement une manutention ou port de charge
+        "repetitiveWork": true_ou_false, // true UNIQUEMENT si le document mentionne explicitement des gestes répétitifs
         "pushPullHandled": true_ou_false,
-        "liftingParams": { // Si liftingHandled est true, proposez des paramètres par défaut plausibles pour ce poste
-          "actualWeight": 15,
-          "durationHours": 4,
-          "verticalPosition": 75,
-          "horizontalDistance": 30,
-          "verticalDistance": 50,
-          "asymmetryAngle": 0,
-          "frequency": 2,
-          "coupling": "good",
-          "genderReference": "recommended"
-        }
+        "liftingParams": null // Laisser null — ne jamais inventer des paramètres non présents dans le document
       }
     }
   ]
 }
 
-N'ajoutez aucune phrase d'explications supplémentaires en dehors du bloc JSON valide. Si des substances ou des postes ont des correspondances directes avec les grands fondamentaux de la prévention (Benzène, Plomb, Styrène, Silice, Toluène, Xylène), utilisez les valeurs limites biologiques et professionnelles réelles pour enrichir au maximum votre réponse.
+RÈGLES STRICTES :
+- N'inventez AUCUNE valeur numérique (poids, fréquence, distance, angle) qui ne figure pas dans le document.
+- Pour liftingParams et repetitiveParams : mettre null si les valeurs ne sont pas explicitement mentionnées dans le document.
+- Pour vlep8h et vlep15min : utiliser uniquement les valeurs présentes dans la FDS, sinon mettre 0.
+- Pour biotoxInfo et metropolInfo : utiliser uniquement les références INRS connues avec certitude (Benzène, Toluène, Styrène, Plomb, Silice, Xylène, Acétone...), sinon mettre null.
+- Ne renvoyez que le JSON valide, sans texte autour.
 `;
 
     contentInput.push({ text: promptText });
@@ -587,32 +582,20 @@ Extrayez TOUTES les informations disponibles et structurez-les en JSON strict se
         }
       ],
       "physicalStrains": {
-        "liftingHandled": true,
-        "repetitiveWork": true,
+        "liftingHandled": true, // true si le document mentionne explicitement une manutention
+        "repetitiveWork": true, // true si le document mentionne explicitement des gestes répétitifs
         "pushPullHandled": false,
-        "liftingParams": {
-          "actualWeight": 20,
-          "durationHours": 4,
-          "verticalPosition": 75,
-          "horizontalDistance": 35,
-          "verticalDistance": 50,
-          "asymmetryAngle": 0,
-          "frequency": 2,
-          "coupling": "fair",
-          "genderReference": "recommended"
-        },
-        "repetitiveParams": {
-          "technicalActionsPerMin": 35,
-          "forceBorgScale": 3,
-          "postureScore": "moderate",
-          "recoveryDeficitHours": 2,
-          "additionalFactors": "few",
-          "durationHours": 5
-        }
+        "liftingParams": null, // null si les valeurs numériques ne figurent pas dans le document
+        "repetitiveParams": null // null si les valeurs numériques ne figurent pas dans le document
       }
     }
   ]
 }
+
+RÈGLES STRICTES :
+- Ne jamais inventer de valeurs numériques (poids, fréquence, durée, distance) absentes du document.
+- liftingParams et repetitiveParams doivent être null si les paramètres ne sont pas explicitement chiffrés dans la FE.
+- Ne renvoyez que le JSON valide, sans texte autour.
 
 Pour les statuts de conformité, utilisez exclusivement : "oui", "non", "à améliorer", "à prévoir", "à s'assurer".
 Ne renvoyez que le JSON valide, sans texte autour.
@@ -742,6 +725,43 @@ Ne renvoyez que le JSON valide, sans blocs d'enrobage.
     res.status(500).json({
       error: error.message || "Erreur interne lors de la rédaction de la synthèse de santé."
     });
+  }
+});
+
+// ─── Consultation références INRS ────────────────────────────────────────────
+app.post("/api/inrs-lookup", async (req: express.Request, res: express.Response): Promise<void> => {
+  try {
+    const { chemicalName, cas, jobTitle, situation } = req.body;
+    const aiClient = getGeminiClient();
+
+    const prompt = `
+Vous êtes un expert en hygiène industrielle utilisant exclusivement les référentiels officiels français de l'INRS.
+
+Contexte du poste :
+- Qualification / poste : ${jobTitle || "non précisé"}
+- Situation de travail : ${situation || "non précisée"}
+- Agent chimique : ${chemicalName || "non précisé"} ${cas ? `(CAS ${cas})` : ""}
+
+En vous basant UNIQUEMENT sur les données publiées par l'INRS (base Biotox, base Métropol, tableaux de VLEP réglementaires français, publications ED/ND/TJ de l'INRS), fournissez :
+
+1. La VLEP-8h et VLCT-15min réglementaires françaises pour cet agent (décret du 1er janvier 2024 ou plus récent).
+2. Les valeurs biologiques d'exposition recommandées (IBE) issues de la base Biotox INRS.
+3. La méthode de prélèvement et d'analyse Métropol associée.
+4. Si disponible : des niveaux d'exposition typiques observés pour des postes similaires en France (données COLCHIC/SCOLA/CARSAT ou publications INRS).
+5. Indiquez clairement si une information n'est pas disponible dans les référentiels INRS plutôt que de l'inventer.
+
+Répondez en français, de manière concise et factuelle (5-8 lignes maximum). Mentionnez les références de documents INRS utilisés (ex: ED6185, ND2098, Biotox 2024...).
+`;
+
+    const response = await generateContentWithRetry(aiClient, {
+      model: "gemini-3.5-flash",
+      contents: prompt,
+    });
+
+    res.json({ suggestion: response.text?.trim() || "" });
+  } catch (error: any) {
+    console.error("INRS lookup error:", error);
+    res.status(500).json({ error: error.message || "Erreur lors de la consultation INRS." });
   }
 });
 
