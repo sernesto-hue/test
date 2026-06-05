@@ -21,7 +21,12 @@ import {
   ShieldAlert,
   ClipboardList,
   ChevronRight,
-  Info
+  Info,
+  Users,
+  BookOpen,
+  HardHat,
+  XCircle,
+  AlertCircle
 } from "lucide-react";
 import {
   AreaChart,
@@ -37,7 +42,7 @@ import {
   Cell
 } from "recharts";
 import { motion, AnimatePresence } from "motion/react";
-import { ChemicalAgent, Workstation, ISO11228Params, ISO11228Result, ISO11228_3Params, ISO11228_3Result, BayesianAnalysisResult, HealthSurveillanceReport } from "./types";
+import { ChemicalAgent, Workstation, ISO11228Params, ISO11228Result, ISO11228_3Params, ISO11228_3Result, BayesianAnalysisResult, HealthSurveillanceReport, EnterpriseSheet, ComplianceStatus } from "./types";
 import { calculateISO11228, calculateISO11228_3, runBayesianExposureSimulation } from "./utils";
 
 // Static Demo Environments for instant execution
@@ -267,7 +272,7 @@ const DEMO_WORKSTATIONS: Workstation[] = [
 ];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<"import" | "bayesian" | "iso11228" | "report">("import");
+  const [activeTab, setActiveTab] = useState<"fe" | "import" | "bayesian" | "iso11228" | "report">("fe");
   const [ergoSubTab, setErgoSubTab] = useState<"lifting" | "repetitive">("lifting");
   
   // App data state
@@ -306,6 +311,15 @@ export default function App() {
     durationHours: 4
   });
   const [repetitiveResult, setRepetitiveResult] = useState<ISO11228_3Result | null>(null);
+
+  // Enterprise Sheet state
+  const [enterpriseSheet, setEnterpriseSheet] = useState<EnterpriseSheet | null>(null);
+  const [feText, setFeText] = useState("");
+  const [feFileName, setFeFileName] = useState("");
+  const [feBase64, setFeBase64] = useState("");
+  const [feMimeType, setFeMimeType] = useState("");
+  const [isAnalyzingFe, setIsAnalyzingFe] = useState(false);
+  const [feError, setFeError] = useState("");
 
   // Health Surveillance Report State
   const [reportData, setReportData] = useState<HealthSurveillanceReport | null>(null);
@@ -539,6 +553,71 @@ Manutention manuelle détectée: Manipulation quotidienne de fûts de peinture d
     setUploadedFileName("FDS_Exemple_Chromatox_Anticorrosion.txt");
   };
 
+  // Handle FE file selection
+  const handleFeFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFeFileName(file.name);
+    setFeMimeType(file.type);
+    if (file.type.startsWith("text/") || file.name.endsWith(".txt") || file.name.endsWith(".csv")) {
+      const reader = new FileReader();
+      reader.onload = (ev) => setFeText(ev.target?.result as string);
+      reader.readAsText(file);
+    } else {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        setFeBase64((ev.target?.result as string).split(",")[1]);
+        setFeText(`[Document joint : ${file.name}]`);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleFeSubmit = async () => {
+    setIsAnalyzingFe(true);
+    setFeError("");
+    try {
+      const response = await fetch("/api/analyze-enterprise-sheet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: feText, fileData: feBase64, fileName: feFileName, fileMimeType: feMimeType }),
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || "Erreur serveur");
+      }
+      const data: EnterpriseSheet = await response.json();
+      setEnterpriseSheet(data);
+      // Inject extracted workstations into the global list
+      if (data.extractedWorkstations && data.extractedWorkstations.length > 0) {
+        const stamped = data.extractedWorkstations.map((w, i) => ({ ...w, id: `fe_ws_${Date.now()}_${i}` }));
+        setWorkstations(prev => [...stamped, ...prev]);
+        setSelectedWorkstationId(stamped[0].id);
+      }
+    } catch (err: any) {
+      setFeError(err.message || "Impossible d'analyser la fiche d'entreprise.");
+    } finally {
+      setIsAnalyzingFe(false);
+    }
+  };
+
+  // Badge de conformité coloré
+  const ComplianceBadge = ({ status }: { status: ComplianceStatus }) => {
+    const map: Record<ComplianceStatus, { cls: string; icon: React.ReactNode }> = {
+      "oui":           { cls: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30", icon: <CheckCircle className="w-3 h-3" /> },
+      "non":           { cls: "bg-red-500/15 text-red-400 border-red-500/30",             icon: <XCircle className="w-3 h-3" /> },
+      "à améliorer":   { cls: "bg-amber-500/15 text-amber-400 border-amber-500/30",       icon: <AlertCircle className="w-3 h-3" /> },
+      "à prévoir":     { cls: "bg-blue-500/15 text-blue-400 border-blue-500/30",          icon: <AlertCircle className="w-3 h-3" /> },
+      "à s'assurer":   { cls: "bg-slate-500/15 text-slate-400 border-slate-500/30",       icon: <AlertCircle className="w-3 h-3" /> },
+    };
+    const s = map[status] || map["à améliorer"];
+    return (
+      <span className={`inline-flex items-center gap-1 text-[9px] font-bold font-mono uppercase tracking-wider border px-1.5 py-0.5 rounded ${s.cls}`}>
+        {s.icon}{status}
+      </span>
+    );
+  };
+
   // Compute log-normal probability density curve for plotting
   const getLogNormalPlotData = () => {
     if (!bayesianResult || !selectedChemical) return [];
@@ -632,6 +711,24 @@ Manutention manuelle détectée: Manipulation quotidienne de fûts de peinture d
       {/* Main navigation tab-bar */}
       <nav className="bg-[#0F1117] border-b border-white/10 sticky top-0 z-40 shadow-md print:hidden">
         <div className="max-w-7xl mx-auto px-6 flex overflow-x-auto gap-2">
+
+          <button
+            onClick={() => setActiveTab("fe")}
+            className={`py-4 px-4 text-xs font-bold font-mono uppercase tracking-wider border-b-2 flex items-center gap-2 transition-all whitespace-nowrap cursor-pointer ${
+              activeTab === "fe"
+                ? "border-violet-500 text-violet-400 font-bold"
+                : "border-transparent text-slate-400 hover:text-slate-200 hover:border-white/10"
+            }`}
+          >
+            <BookOpen className="w-4 h-4" />
+            <span>0. Fiche d'Entreprise</span>
+            {enterpriseSheet && (
+              <span className="bg-violet-500/20 text-violet-400 border border-violet-500/30 text-[9px] px-1.5 py-0.2 rounded font-bold uppercase">
+                Importée
+              </span>
+            )}
+          </button>
+
           <button
             onClick={() => setActiveTab("import")}
             className={`py-4 px-4 text-xs font-bold font-mono uppercase tracking-wider border-b-2 flex items-center gap-2 transition-all whitespace-nowrap cursor-pointer ${
@@ -727,6 +824,234 @@ Manutention manuelle détectée: Manipulation quotidienne de fûts de peinture d
             )}
           </button>
         </div>
+
+        {/* Tab 0: FICHE D'ENTREPRISE */}
+        {activeTab === "fe" && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-6">
+
+            {/* Import panel */}
+            {!enterpriseSheet && (
+              <div className="bg-[#151921] p-6 rounded-xl shadow-2xl border border-white/5 space-y-5 max-w-2xl mx-auto">
+                <div>
+                  <h3 className="text-md font-bold text-white uppercase tracking-wider font-display flex items-center gap-2">
+                    <BookOpen className="w-5 h-5 text-violet-400" />
+                    Importer une Fiche d'Entreprise (FE)
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Document rédigé par un technicien HSE lors d'une visite d'établissement. Contient les effectifs, les risques par poste, les EPI et les conformités.
+                  </p>
+                </div>
+
+                <div className="border border-dashed border-white/10 rounded-xl p-5 text-center bg-[#0F1117] hover:border-violet-500/40 transition-all">
+                  <input type="file" id="fe-upload" onChange={handleFeFileSelect} className="hidden" accept=".txt,.doc,.docx,.pdf,.csv" />
+                  <label htmlFor="fe-upload" className="cursor-pointer space-y-2 block">
+                    <div className="inline-flex bg-[#151921] rounded-lg p-3 shadow-md border border-white/10">
+                      <Upload className="w-5 h-5 text-violet-400" />
+                    </div>
+                    <p className="text-xs font-semibold text-slate-200">Glissez ou <span className="text-violet-400 underline">parcourez</span> votre Fiche d'Entreprise</p>
+                    <p className="text-[11px] text-slate-500">.doc / .docx / .pdf / .txt acceptés</p>
+                    {feFileName && <div className="inline-block bg-violet-500/10 text-violet-400 border border-violet-500/20 text-[10px] py-1 px-2.5 rounded font-mono mt-1">📄 {feFileName}</div>}
+                  </label>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-bold text-slate-400 font-mono uppercase tracking-widest">Ou collez le texte directement</label>
+                  <textarea
+                    value={feText}
+                    onChange={(e) => setFeText(e.target.value)}
+                    placeholder="Copiez-collez le contenu de la fiche d'entreprise ici..."
+                    rows={8}
+                    className="w-full bg-[#0F1117] border border-white/10 rounded-xl p-4 text-xs font-mono focus:outline-none focus:border-violet-500 text-slate-200 placeholder-slate-600 transition-all"
+                  />
+                </div>
+
+                {feError && (
+                  <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg text-xs flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" /><p>{feError}</p>
+                  </div>
+                )}
+
+                <button
+                  onClick={handleFeSubmit}
+                  disabled={isAnalyzingFe || (!feText && !feBase64)}
+                  className="w-full bg-violet-600 hover:bg-violet-500 text-white font-bold font-mono text-xs uppercase tracking-widest py-3.5 rounded-xl flex items-center justify-center gap-2 transition disabled:opacity-50 cursor-pointer"
+                >
+                  {isAnalyzingFe ? <><RefreshCw className="animate-spin w-4 h-4" /><span>Analyse IA en cours...</span></> : <><BookOpen className="w-4 h-4" /><span>Analyser la Fiche d'Entreprise</span></>}
+                </button>
+              </div>
+            )}
+
+            {/* FE Results */}
+            {enterpriseSheet && (
+              <div className="space-y-6">
+
+                {/* Header entreprise */}
+                <div className="bg-[#151921] rounded-xl p-6 border border-violet-500/20 border-l-4 border-l-violet-500 space-y-2">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-[9px] font-mono text-violet-400 uppercase tracking-widest font-bold">Fiche d'Entreprise importée</p>
+                      <h2 className="text-xl font-black text-white mt-1">{enterpriseSheet.company.name}</h2>
+                      <p className="text-xs text-slate-400 mt-0.5">{enterpriseSheet.company.address}</p>
+                      <p className="text-xs text-slate-300 mt-1"><strong className="text-slate-500">Activité :</strong> {enterpriseSheet.company.activity} — <span className="font-mono text-slate-400">NAF {enterpriseSheet.company.nafCode}</span></p>
+                      {enterpriseSheet.company.collectiveAgreement && <p className="text-xs text-slate-400"><strong className="text-slate-500">CCN :</strong> {enterpriseSheet.company.collectiveAgreement}</p>}
+                    </div>
+                    <div className="text-right text-xs text-slate-500 font-mono shrink-0">
+                      <p>Visite : {enterpriseSheet.visitDate}</p>
+                      <p className="mt-0.5">{enterpriseSheet.technician}</p>
+                      <p className="text-violet-400">{enterpriseSheet.doctor}</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setEnterpriseSheet(null)} className="text-[10px] font-mono text-slate-500 hover:text-red-400 underline cursor-pointer mt-1">
+                    ↺ Réimporter une nouvelle fiche
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                  {/* Effectifs */}
+                  <div className="bg-[#151921] p-5 rounded-xl border border-white/5 space-y-3">
+                    <h4 className="text-xs font-bold text-white uppercase tracking-wider font-mono flex items-center gap-2">
+                      <Users className="w-4 h-4 text-violet-400" /> Effectifs par Poste
+                    </h4>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-[11px] text-left">
+                        <thead>
+                          <tr className="text-[9px] font-mono text-slate-500 uppercase border-b border-white/5">
+                            <th className="pb-2 pr-3">Unité</th>
+                            <th className="pb-2 pr-3">Fonction</th>
+                            <th className="pb-2 pr-2 text-center">H</th>
+                            <th className="pb-2 pr-2 text-center">F</th>
+                            <th className="pb-2 pr-2 text-center">CDI</th>
+                            <th className="pb-2 pr-2 text-center">CDD</th>
+                            <th className="pb-2 text-center font-bold text-slate-300">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-white/5">
+                          {enterpriseSheet.staff.map((s, i) => (
+                            <tr key={i} className="text-slate-300">
+                              <td className="py-1.5 pr-3 text-slate-500 text-[10px]">{s.unit}</td>
+                              <td className="py-1.5 pr-3 font-medium">{s.jobTitle}</td>
+                              <td className="py-1.5 pr-2 text-center font-mono">{s.men || "—"}</td>
+                              <td className="py-1.5 pr-2 text-center font-mono">{s.women || "—"}</td>
+                              <td className="py-1.5 pr-2 text-center font-mono text-emerald-400">{s.cdi || "—"}</td>
+                              <td className="py-1.5 pr-2 text-center font-mono text-amber-400">{s.cdd || "—"}</td>
+                              <td className="py-1.5 text-center font-bold text-white">{s.total}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Produits chimiques observés */}
+                  <div className="bg-[#151921] p-5 rounded-xl border border-white/5 space-y-3">
+                    <h4 className="text-xs font-bold text-white uppercase tracking-wider font-mono flex items-center gap-2">
+                      <ShieldAlert className="w-4 h-4 text-rose-400" /> Produits Chimiques Observés
+                    </h4>
+                    {enterpriseSheet.observedChemicals.length === 0
+                      ? <p className="text-xs text-slate-500 italic">Aucun produit identifié.</p>
+                      : (
+                        <div className="space-y-2">
+                          {enterpriseSheet.observedChemicals.map((c, i) => (
+                            <div key={i} className="p-3 bg-[#0F1117] rounded-lg border border-white/5">
+                              <div className="flex items-start justify-between gap-2">
+                                <span className="text-xs font-semibold text-white">{c.name}</span>
+                                <span className={`text-[9px] font-bold font-mono px-1.5 py-0.5 rounded border uppercase whitespace-nowrap ${
+                                  c.hazardClass.toLowerCase().includes("cmr") ? "bg-red-500/15 text-red-400 border-red-500/30" :
+                                  c.hazardClass.toLowerCase().includes("nocif") || c.hazardClass.toLowerCase().includes("irritant") ? "bg-amber-500/15 text-amber-400 border-amber-500/30" :
+                                  "bg-slate-500/15 text-slate-400 border-slate-500/30"
+                                }`}>{c.hazardClass}</span>
+                              </div>
+                              {c.comment && <p className="text-[10px] text-slate-500 mt-1">{c.comment}</p>}
+                            </div>
+                          ))}
+                        </div>
+                      )
+                    }
+                  </div>
+                </div>
+
+                {/* Risques physiques & ergonomiques */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <div className="bg-[#151921] p-5 rounded-xl border border-white/5 space-y-3">
+                    <h4 className="text-xs font-bold text-white uppercase tracking-wider font-mono">⚡ Risques Physiques & Chimiques</h4>
+                    <div className="space-y-1.5">
+                      {[...enterpriseSheet.physicalRisks, ...enterpriseSheet.chemicalRisks, ...enterpriseSheet.infectiousRisks].map((r, i) => (
+                        <div key={i} className="flex items-start gap-2 text-xs py-1.5 border-b border-white/5">
+                          <div className="flex gap-1 shrink-0 mt-0.5">
+                            {r.administrative && <span className="text-[9px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1 rounded font-mono">ADM</span>}
+                            {r.production && <span className="text-[9px] bg-orange-500/10 text-orange-400 border border-orange-500/20 px-1 rounded font-mono">PRO</span>}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <span className="font-semibold text-slate-200">{r.riskName}</span>
+                            {r.comment && <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">{r.comment}</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="bg-[#151921] p-5 rounded-xl border border-white/5 space-y-3">
+                    <h4 className="text-xs font-bold text-white uppercase tracking-wider font-mono">🏋️ Contraintes Ergonomiques</h4>
+                    <div className="space-y-1.5">
+                      {enterpriseSheet.ergonomicConstraints.map((r, i) => (
+                        <div key={i} className="flex items-start gap-2 text-xs py-1.5 border-b border-white/5">
+                          <div className="flex gap-1 shrink-0 mt-0.5">
+                            {r.administrative && <span className="text-[9px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1 rounded font-mono">ADM</span>}
+                            {r.production && <span className="text-[9px] bg-orange-500/10 text-orange-400 border border-orange-500/20 px-1 rounded font-mono">PRO</span>}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <span className="font-semibold text-slate-200">{r.riskName}</span>
+                            {r.comment && <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">{r.comment}</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* EPI & Conformités */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {[
+                    { title: "EPI — Protections Individuelles", data: enterpriseSheet.individualProtections, icon: <HardHat className="w-4 h-4 text-amber-400" /> },
+                    { title: "Sécurité & Prévention", data: enterpriseSheet.safetyMeasures, icon: <ShieldAlert className="w-4 h-4 text-blue-400" /> },
+                    { title: "Formations Sécurité", data: enterpriseSheet.safetyTraining, icon: <BookOpen className="w-4 h-4 text-violet-400" /> },
+                  ].map(({ title, data, icon }) => (
+                    <div key={title} className="bg-[#151921] p-5 rounded-xl border border-white/5 space-y-3">
+                      <h4 className="text-xs font-bold text-white uppercase tracking-wider font-mono flex items-center gap-2">{icon}{title}</h4>
+                      <div className="space-y-1.5">
+                        {data.map((e, i) => (
+                          <div key={i} className="flex items-center justify-between gap-2 text-[11px] py-1 border-b border-white/5">
+                            <span className="text-slate-300 flex-1">{e.item}</span>
+                            <ComplianceBadge status={e.status} />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* CTA : aller analyser les postes extraits */}
+                {enterpriseSheet.extractedWorkstations && enterpriseSheet.extractedWorkstations.length > 0 && (
+                  <div className="bg-violet-500/10 border border-violet-500/30 rounded-xl p-5 flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-bold text-violet-300 uppercase font-mono tracking-wider">{enterpriseSheet.extractedWorkstations.length} poste(s) déduit(s) automatiquement</p>
+                      <p className="text-xs text-slate-400 mt-0.5">Les postes ont été ajoutés au sélecteur. Vous pouvez maintenant lancer l'analyse bayésienne ou ergonomique.</p>
+                    </div>
+                    <button
+                      onClick={() => setActiveTab("bayesian")}
+                      className="shrink-0 bg-violet-600 hover:bg-violet-500 text-white font-bold font-mono text-xs uppercase tracking-wider py-2.5 px-5 rounded-lg flex items-center gap-2 transition cursor-pointer"
+                    >
+                      <TrendingUp className="w-4 h-4" />
+                      Analyser l'exposition
+                    </button>
+                  </div>
+                )}
+
+              </div>
+            )}
+          </motion.div>
+        )}
 
         {/* Tab 1: IMPORT & EXTRACTION */}
         {activeTab === "import" && (

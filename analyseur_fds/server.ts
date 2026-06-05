@@ -466,6 +466,203 @@ N'ajoutez aucune phrase d'explications supplémentaires en dehors du bloc JSON v
   }
 });
 
+// ─── Analyse Fiche d'Entreprise (FE) ─────────────────────────────────────────
+app.post("/api/analyze-enterprise-sheet", async (req: express.Request, res: express.Response): Promise<void> => {
+  try {
+    const { text, fileData, fileName, fileMimeType } = req.body;
+
+    if (!text && !fileData) {
+      res.status(400).json({ error: "Aucun document ou texte fourni." });
+      return;
+    }
+
+    const aiClient = getGeminiClient();
+    let contentInput: any[] = [];
+
+    if (fileData && fileMimeType) {
+      contentInput.push({ inlineData: { data: fileData, mimeType: fileMimeType } });
+    }
+
+    const promptText = `
+Vous êtes un expert en santé au travail et en prévention des risques professionnels (médecine du travail, France).
+Analysez le document suivant qui est une FICHE D'ENTREPRISE (FE) — document rédigé par un technicien hygiène-sécurité ou un médecin du travail lors d'une visite d'établissement.
+
+--- DÉBUT DU DOCUMENT ---
+${text || "(Document en pièce jointe)"}
+${fileName ? `Fichier : ${fileName}` : ""}
+--- FIN DU DOCUMENT ---
+
+Extrayez TOUTES les informations disponibles et structurez-les en JSON strict selon ce format :
+
+{
+  "id": "fe_[entreprise_courte]_[année]",
+  "visitDate": "date de visite (ex: 2019-10-03)",
+  "technician": "Nom du technicien/préventeur ayant rédigé la fiche",
+  "doctor": "Nom du médecin du travail responsable",
+  "company": {
+    "name": "Nom légal de l'entreprise",
+    "address": "Adresse complète",
+    "activity": "Description de l'activité principale",
+    "nafCode": "Code NAF",
+    "membershipId": "N° d'adhésion au service de santé au travail",
+    "collectiveAgreement": "Convention collective applicable"
+  },
+  "staff": [
+    {
+      "unit": "Unité fonctionnelle",
+      "jobTitle": "Fonction ou qualification",
+      "men": 0,
+      "women": 0,
+      "cdi": 0,
+      "cdd": 0,
+      "total": 0
+    }
+  ],
+  "physicalRisks": [
+    {
+      "category": "Catégorie (ex: Facteurs D'ambiance, Poussières...)",
+      "riskName": "Nom du risque (ex: Sonore, Thermique...)",
+      "administrative": true,
+      "production": true,
+      "comment": "Commentaire issu du document"
+    }
+  ],
+  "chemicalRisks": [
+    {
+      "category": "Risques Chimiques",
+      "riskName": "Type (ex: CMR, Nocif/Irritant...)",
+      "administrative": false,
+      "production": true,
+      "comment": "Produits observés et commentaires"
+    }
+  ],
+  "infectiousRisks": [],
+  "ergonomicConstraints": [
+    {
+      "category": "Posture / Manutention / Gestes répétitifs",
+      "riskName": "Nom précis (ex: Gestes répétitifs forcés, Charges portées manuellement...)",
+      "administrative": false,
+      "production": true,
+      "comment": "Tâches et commentaires détaillés"
+    }
+  ],
+  "observedChemicals": [
+    {
+      "name": "Nom du produit chimique observé",
+      "hazardClass": "Classification (ex: CMR Catégorie 1, Reprotoxique Cat 3, Nocif/Irritant)",
+      "units": ["Unités concernées"],
+      "comment": "Contexte d'utilisation"
+    }
+  ],
+  "collectiveProtections": [
+    { "item": "Description de la mesure", "status": "oui" }
+  ],
+  "individualProtections": [
+    { "item": "EPI (ex: Casque anti-bruit)", "status": "oui" }
+  ],
+  "safetyMeasures": [
+    { "item": "Mesure de sécurité", "status": "oui" }
+  ],
+  "safetyTraining": [
+    { "item": "Formation (ex: Formation au Risque Chimique)", "status": "non" }
+  ],
+  "extractedWorkstations": [
+    {
+      "id": "ws_[court]",
+      "name": "Nom de l'atelier ou du poste (ex: Atelier de production)",
+      "jobTitle": "Qualification principale (ex: Agent de production, Chef d'équipe)",
+      "situation": "Description complète de la situation d'exposition et des tâches",
+      "chemicals": [
+        {
+          "name": "Nom chimique (ex: Isocyanates - Colle KLEIBERIT)",
+          "cas": "Numéro CAS si connu, sinon vide",
+          "percentage": "Concentration ou usage observé",
+          "hPhrases": ["H-phrases si connues"],
+          "pictograms": ["GHS"],
+          "vlep8h": 0,
+          "vlep15min": 0,
+          "unit": "mg/m³",
+          "biotoxInfo": null,
+          "metropolInfo": null
+        }
+      ],
+      "physicalStrains": {
+        "liftingHandled": true,
+        "repetitiveWork": true,
+        "pushPullHandled": false,
+        "liftingParams": {
+          "actualWeight": 20,
+          "durationHours": 4,
+          "verticalPosition": 75,
+          "horizontalDistance": 35,
+          "verticalDistance": 50,
+          "asymmetryAngle": 0,
+          "frequency": 2,
+          "coupling": "fair",
+          "genderReference": "recommended"
+        },
+        "repetitiveParams": {
+          "technicalActionsPerMin": 35,
+          "forceBorgScale": 3,
+          "postureScore": "moderate",
+          "recoveryDeficitHours": 2,
+          "additionalFactors": "few",
+          "durationHours": 5
+        }
+      }
+    }
+  ]
+}
+
+Pour les statuts de conformité, utilisez exclusivement : "oui", "non", "à améliorer", "à prévoir", "à s'assurer".
+Ne renvoyez que le JSON valide, sans texte autour.
+`;
+
+    contentInput.push({ text: promptText });
+
+    const response = await generateContentWithRetry(aiClient, {
+      model: "gemini-3.5-flash",
+      contents: contentInput,
+      config: { responseMimeType: "application/json" },
+    });
+
+    let resultJson = response.text || "{}";
+    if (resultJson.startsWith("```json")) resultJson = resultJson.substring(7);
+    if (resultJson.endsWith("```")) resultJson = resultJson.substring(0, resultJson.length - 3);
+
+    const parsed = JSON.parse(resultJson.trim());
+
+    // Cross-reference extracted chemicals with CHEMICAL_REFERENTIAL
+    if (parsed.extractedWorkstations) {
+      for (const wk of parsed.extractedWorkstations) {
+        if (Array.isArray(wk.chemicals)) {
+          wk.chemicals = wk.chemicals.map((chem: any) => {
+            const ref = CHEMICAL_REFERENTIAL.find(
+              c => c.cas === chem.cas || c.name.toLowerCase() === chem.name.toLowerCase()
+            );
+            if (ref) {
+              return {
+                ...chem,
+                vlep8h: chem.vlep8h || ref.vlep8h,
+                vlep15min: chem.vlep15min || ref.vlep15min,
+                unit: chem.unit || ref.unit,
+                biotoxInfo: chem.biotoxInfo || ref.biotoxInfo,
+                metropolInfo: chem.metropolInfo || ref.metropolInfo,
+              };
+            }
+            return chem;
+          });
+        }
+      }
+    }
+
+    res.json(parsed);
+  } catch (error: any) {
+    console.error("Error analyzing enterprise sheet:", error);
+    res.status(500).json({ error: error.message || "Erreur lors de l'analyse de la Fiche d'Entreprise." });
+  }
+});
+
 // Generate dynamic Health Report Summary using AI for smart text drafting
 app.post("/api/generate-health-report", async (req: express.Request, res: express.Response) => {
   try {

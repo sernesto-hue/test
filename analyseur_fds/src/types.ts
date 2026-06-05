@@ -111,6 +111,66 @@ export interface BayesianAnalysisResult {
   posteriorSamples: { p95: number; gm: number; index: number }[];
 }
 
+// ─── Fiche d'Entreprise (FE) ────────────────────────────────────────────────
+
+export type ComplianceStatus = "oui" | "non" | "à améliorer" | "à prévoir" | "à s'assurer";
+
+export interface StaffEntry {
+  unit: string;       // Unité fonctionnelle (ex: "Atelier de production")
+  jobTitle: string;   // Fonction (ex: "Agent de production")
+  men: number;
+  women: number;
+  cdi: number;
+  cdd: number;
+  total: number;
+}
+
+export interface RiskEntry {
+  category: string;   // ex: "Facteurs D'ambiance", "Poussières"
+  riskName: string;   // ex: "Sonore", "Gestes répétitifs"
+  administrative: boolean;
+  production: boolean;
+  comment: string;
+}
+
+export interface ComplianceEntry {
+  item: string;
+  status: ComplianceStatus;
+}
+
+export interface ObservedChemical {
+  name: string;
+  hazardClass: string;   // ex: "CMR", "Nocif/Irritant"
+  units: string[];       // ex: ["Atelier de production"]
+  comment: string;
+}
+
+export interface EnterpriseSheet {
+  id: string;
+  visitDate: string;
+  technician: string;
+  doctor: string;
+  company: {
+    name: string;
+    address: string;
+    activity: string;
+    nafCode: string;
+    membershipId?: string;
+    collectiveAgreement?: string;
+  };
+  staff: StaffEntry[];
+  physicalRisks: RiskEntry[];
+  chemicalRisks: RiskEntry[];
+  infectiousRisks: RiskEntry[];
+  ergonomicConstraints: RiskEntry[];
+  observedChemicals: ObservedChemical[];
+  collectiveProtections: ComplianceEntry[];
+  individualProtections: ComplianceEntry[];
+  safetyMeasures: ComplianceEntry[];
+  safetyTraining: ComplianceEntry[];
+  extractedWorkstations?: Workstation[]; // Postes déduits pour analyse
+}
+
 export interface HealthSurveillanceReport {
   workstationId: string;
   workstationName: string;
