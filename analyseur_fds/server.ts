@@ -205,7 +205,7 @@ const CHEMICAL_REFERENTIAL = [
 let genAI: GoogleGenAI | null = null;
 function getGeminiClient(): GoogleGenAI {
   if (!genAI) {
-    const key = process.env.GEMINI_API_KEY;
+    const key = process.env.gemini || process.env.GEMINI_API_KEY;
     if (!key || key === "MY_GEMINI_API_KEY") {
       throw new Error(
         "Clé d'API GEMINI_API_KEY manquante. Veuillez la configurer dans l'onglet Settings > Secrets de l'interface Google AI Studio."
