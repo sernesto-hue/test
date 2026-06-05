@@ -42,7 +42,7 @@ import {
   Cell
 } from "recharts";
 import { motion, AnimatePresence } from "motion/react";
-import { ChemicalAgent, Workstation, ISO11228Params, ISO11228Result, ISO11228_3Params, ISO11228_3Result, BayesianAnalysisResult, HealthSurveillanceReport, EnterpriseSheet, ComplianceStatus } from "./types";
+import { ChemicalAgent, Workstation, ISO11228Params, ISO11228Result, ISO11228_3Params, ISO11228_3Result, BayesianAnalysisResult, HealthSurveillanceReport, EnterpriseSheet, ComplianceStatus, DuerpComparisonResult } from "./types";
 import { calculateISO11228, calculateISO11228_3, runBayesianExposureSimulation } from "./utils";
 
 const EMPTY_LIFTING_PARAMS: ISO11228Params = {
@@ -109,6 +109,16 @@ export default function App() {
   const [feMimeType, setFeMimeType] = useState("");
   const [isAnalyzingFe, setIsAnalyzingFe] = useState(false);
   const [feError, setFeError] = useState("");
+
+  // Filtre par unité dans la FE
+  const [selectedUnit, setSelectedUnit] = useState<"all" | string>("all");
+
+  // Comparaison DUERP
+  const [duerpText, setDuerpText] = useState("");
+  const [duerpFileName, setDuerpFileName] = useState("");
+  const [isDuerpComparing, setIsDuerpComparing] = useState(false);
+  const [duerpComparison, setDuerpComparison] = useState<DuerpComparisonResult | null>(null);
+  const [duerpError, setDuerpError] = useState("");
 
   // Health Surveillance Report State
   const [reportData, setReportData] = useState<HealthSurveillanceReport | null>(null);
@@ -201,6 +211,37 @@ export default function App() {
     } finally {
       setInrsLoading(false);
     }
+  };
+
+  // Handler comparaison DUERP
+  const handleDuerpCompare = async () => {
+    if (!enterpriseSheet || !duerpText) return;
+    setIsDuerpComparing(true);
+    setDuerpError("");
+    setDuerpComparison(null);
+    try {
+      const response = await fetch("/api/compare-duerp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ referenceSheet: enterpriseSheet, duerpText, duerpFileName }),
+      });
+      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || "Erreur serveur");
+      setDuerpComparison(await response.json());
+    } catch (err: any) {
+      setDuerpError(err.message || "Impossible d'analyser le DUERP.");
+    } finally {
+      setIsDuerpComparing(false);
+    }
+  };
+
+  // Filtrage des risques par unité sélectionnée
+  const isUnitAdmin = (unit: string) =>
+    /admin|bureau|secrét|direction|facturat|commercial|accueil|comptab/i.test(unit);
+
+  const filterRiskByUnit = (r: { administrative: boolean; production: boolean }) => {
+    if (selectedUnit === "all") return true;
+    if (isUnitAdmin(selectedUnit)) return r.administrative;
+    return r.production;
   };
 
   // Handle Drag & Drop / File inputs
@@ -691,174 +732,370 @@ Manutention manuelle détectée: Manipulation quotidienne de fûts de peinture d
             )}
 
             {/* FE Results */}
-            {enterpriseSheet && (
+            {enterpriseSheet && (() => {
+              // Unités uniques extraites des effectifs
+              const units = Array.from(new Set(enterpriseSheet.staff.map(s => s.unit)));
+
+              return (
               <div className="space-y-6">
 
                 {/* Header entreprise */}
-                <div className="bg-[#151921] rounded-xl p-6 border border-violet-500/20 border-l-4 border-l-violet-500 space-y-2">
+                <div className="bg-[#151921] rounded-xl p-5 border border-violet-500/20 border-l-4 border-l-violet-500">
                   <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-[9px] font-mono text-violet-400 uppercase tracking-widest font-bold">Fiche d'Entreprise importée</p>
-                      <h2 className="text-xl font-black text-white mt-1">{enterpriseSheet.company.name}</h2>
-                      <p className="text-xs text-slate-400 mt-0.5">{enterpriseSheet.company.address}</p>
-                      <p className="text-xs text-slate-300 mt-1"><strong className="text-slate-500">Activité :</strong> {enterpriseSheet.company.activity} — <span className="font-mono text-slate-400">NAF {enterpriseSheet.company.nafCode}</span></p>
+                    <div className="space-y-0.5">
+                      <p className="text-[9px] font-mono text-violet-400 uppercase tracking-widest font-bold">Fiche d'Entreprise — référence de contrôle</p>
+                      <h2 className="text-xl font-black text-white">{enterpriseSheet.company.name}</h2>
+                      <p className="text-xs text-slate-400">{enterpriseSheet.company.address}</p>
+                      <p className="text-xs text-slate-300"><strong className="text-slate-500">Activité :</strong> {enterpriseSheet.company.activity} — <span className="font-mono text-slate-400">NAF {enterpriseSheet.company.nafCode}</span></p>
                       {enterpriseSheet.company.collectiveAgreement && <p className="text-xs text-slate-400"><strong className="text-slate-500">CCN :</strong> {enterpriseSheet.company.collectiveAgreement}</p>}
                     </div>
                     <div className="text-right text-xs text-slate-500 font-mono shrink-0">
                       <p>Visite : {enterpriseSheet.visitDate}</p>
                       <p className="mt-0.5">{enterpriseSheet.technician}</p>
                       <p className="text-violet-400">{enterpriseSheet.doctor}</p>
+                      <button onClick={() => { setEnterpriseSheet(null); setDuerpComparison(null); setSelectedUnit("all"); }} className="text-[10px] text-slate-500 hover:text-red-400 underline cursor-pointer mt-2 block text-right">
+                        ↺ Réimporter
+                      </button>
                     </div>
                   </div>
-                  <button onClick={() => setEnterpriseSheet(null)} className="text-[10px] font-mono text-slate-500 hover:text-red-400 underline cursor-pointer mt-1">
-                    ↺ Réimporter une nouvelle fiche
-                  </button>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Sélecteur de poste / unité */}
+                <div className="bg-[#151921] rounded-xl p-4 border border-white/5">
+                  <p className="text-[9px] font-mono text-slate-500 uppercase tracking-widest mb-3 font-bold">Filtrer les risques par poste / unité de travail</p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => setSelectedUnit("all")}
+                      className={`text-xs font-bold font-mono uppercase tracking-wider px-3 py-1.5 rounded-lg border transition cursor-pointer ${
+                        selectedUnit === "all"
+                          ? "bg-violet-600 text-white border-violet-500"
+                          : "bg-[#0F1117] text-slate-400 border-white/10 hover:text-slate-200"
+                      }`}
+                    >
+                      Tous les postes
+                    </button>
+                    {units.map(unit => (
+                      <button
+                        key={unit}
+                        onClick={() => setSelectedUnit(unit)}
+                        className={`text-xs font-bold font-mono uppercase tracking-wider px-3 py-1.5 rounded-lg border transition cursor-pointer ${
+                          selectedUnit === unit
+                            ? "bg-violet-600 text-white border-violet-500"
+                            : "bg-[#0F1117] text-slate-400 border-white/10 hover:text-slate-200"
+                        }`}
+                      >
+                        {unit}
+                        <span className="ml-1.5 text-[9px] opacity-60">
+                          ({enterpriseSheet.staff.filter(s => s.unit === unit).reduce((a, s) => a + s.total, 0)} pers.)
+                        </span>
+                      </button>
+                    ))}
+                  </div>
 
-                  {/* Effectifs */}
-                  <div className="bg-[#151921] p-5 rounded-xl border border-white/5 space-y-3">
-                    <h4 className="text-xs font-bold text-white uppercase tracking-wider font-mono flex items-center gap-2">
-                      <Users className="w-4 h-4 text-violet-400" /> Effectifs par Poste
-                    </h4>
-                    <div className="overflow-x-auto">
+                  {/* Effectifs du poste sélectionné */}
+                  {selectedUnit !== "all" && (
+                    <div className="mt-4 overflow-x-auto">
                       <table className="w-full text-[11px] text-left">
                         <thead>
                           <tr className="text-[9px] font-mono text-slate-500 uppercase border-b border-white/5">
-                            <th className="pb-2 pr-3">Unité</th>
-                            <th className="pb-2 pr-3">Fonction</th>
-                            <th className="pb-2 pr-2 text-center">H</th>
-                            <th className="pb-2 pr-2 text-center">F</th>
-                            <th className="pb-2 pr-2 text-center">CDI</th>
-                            <th className="pb-2 pr-2 text-center">CDD</th>
+                            <th className="pb-2 pr-4">Fonction</th>
+                            <th className="pb-2 pr-3 text-center">H</th>
+                            <th className="pb-2 pr-3 text-center">F</th>
+                            <th className="pb-2 pr-3 text-center">CDI</th>
+                            <th className="pb-2 pr-3 text-center">CDD</th>
                             <th className="pb-2 text-center font-bold text-slate-300">Total</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-white/5">
-                          {enterpriseSheet.staff.map((s, i) => (
+                          {enterpriseSheet.staff.filter(s => s.unit === selectedUnit).map((s, i) => (
                             <tr key={i} className="text-slate-300">
-                              <td className="py-1.5 pr-3 text-slate-500 text-[10px]">{s.unit}</td>
-                              <td className="py-1.5 pr-3 font-medium">{s.jobTitle}</td>
-                              <td className="py-1.5 pr-2 text-center font-mono">{s.men || "—"}</td>
-                              <td className="py-1.5 pr-2 text-center font-mono">{s.women || "—"}</td>
-                              <td className="py-1.5 pr-2 text-center font-mono text-emerald-400">{s.cdi || "—"}</td>
-                              <td className="py-1.5 pr-2 text-center font-mono text-amber-400">{s.cdd || "—"}</td>
+                              <td className="py-1.5 pr-4 font-medium">{s.jobTitle}</td>
+                              <td className="py-1.5 pr-3 text-center font-mono">{s.men || "—"}</td>
+                              <td className="py-1.5 pr-3 text-center font-mono">{s.women || "—"}</td>
+                              <td className="py-1.5 pr-3 text-center font-mono text-emerald-400">{s.cdi || "—"}</td>
+                              <td className="py-1.5 pr-3 text-center font-mono text-amber-400">{s.cdd || "—"}</td>
                               <td className="py-1.5 text-center font-bold text-white">{s.total}</td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
-                  </div>
+                  )}
+                </div>
 
-                  {/* Produits chimiques observés */}
+                {/* Risques filtrés pour l'unité sélectionnée */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                  {/* Risques physiques, chimiques, infectieux */}
                   <div className="bg-[#151921] p-5 rounded-xl border border-white/5 space-y-3">
                     <h4 className="text-xs font-bold text-white uppercase tracking-wider font-mono flex items-center gap-2">
-                      <ShieldAlert className="w-4 h-4 text-rose-400" /> Produits Chimiques Observés
+                      <ShieldAlert className="w-4 h-4 text-rose-400" />
+                      Risques — {selectedUnit === "all" ? "Tous postes" : selectedUnit}
                     </h4>
-                    {enterpriseSheet.observedChemicals.length === 0
-                      ? <p className="text-xs text-slate-500 italic">Aucun produit identifié.</p>
-                      : (
-                        <div className="space-y-2">
-                          {enterpriseSheet.observedChemicals.map((c, i) => (
-                            <div key={i} className="p-3 bg-[#0F1117] rounded-lg border border-white/5">
-                              <div className="flex items-start justify-between gap-2">
-                                <span className="text-xs font-semibold text-white">{c.name}</span>
-                                <span className={`text-[9px] font-bold font-mono px-1.5 py-0.5 rounded border uppercase whitespace-nowrap ${
-                                  c.hazardClass.toLowerCase().includes("cmr") ? "bg-red-500/15 text-red-400 border-red-500/30" :
-                                  c.hazardClass.toLowerCase().includes("nocif") || c.hazardClass.toLowerCase().includes("irritant") ? "bg-amber-500/15 text-amber-400 border-amber-500/30" :
-                                  "bg-slate-500/15 text-slate-400 border-slate-500/30"
-                                }`}>{c.hazardClass}</span>
+
+                    {/* Produits chimiques observés */}
+                    {enterpriseSheet.observedChemicals.length > 0 && (
+                      <div className="space-y-1.5 pb-2 border-b border-white/5">
+                        <p className="text-[9px] font-bold text-slate-500 font-mono uppercase">Produits chimiques observés</p>
+                        {enterpriseSheet.observedChemicals.map((c, i) => (
+                          <div key={i} className="flex items-start justify-between gap-2 py-1">
+                            <span className="text-xs text-slate-200 font-medium">{c.name}</span>
+                            <span className={`text-[9px] font-bold font-mono px-1.5 py-0.5 rounded border uppercase whitespace-nowrap shrink-0 ${
+                              c.hazardClass.toLowerCase().includes("cmr") ? "bg-red-500/15 text-red-400 border-red-500/30" :
+                              c.hazardClass.toLowerCase().includes("nocif") || c.hazardClass.toLowerCase().includes("irritant") ? "bg-amber-500/15 text-amber-400 border-amber-500/30" :
+                              "bg-slate-500/15 text-slate-400 border-slate-500/30"
+                            }`}>{c.hazardClass}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Risques physiques & chimiques filtrés */}
+                    <div className="space-y-1.5">
+                      {[...enterpriseSheet.physicalRisks, ...enterpriseSheet.chemicalRisks, ...enterpriseSheet.infectiousRisks]
+                        .filter(filterRiskByUnit)
+                        .map((r, i) => (
+                        <div key={i} className="flex items-start gap-2 py-1.5 border-b border-white/5">
+                          <div className="flex gap-1 shrink-0 mt-0.5">
+                            {r.administrative && <span className="text-[9px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1 rounded font-mono">ADM</span>}
+                            {r.production && <span className="text-[9px] bg-orange-500/10 text-orange-400 border border-orange-500/20 px-1 rounded font-mono">PRO</span>}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <span className="text-xs font-semibold text-slate-200">{r.riskName}</span>
+                            {r.comment && <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">{r.comment}</p>}
+                          </div>
+                        </div>
+                      ))}
+                      {[...enterpriseSheet.physicalRisks, ...enterpriseSheet.chemicalRisks].filter(filterRiskByUnit).length === 0 && (
+                        <p className="text-xs text-slate-500 italic">Aucun risque physique/chimique pour cette unité.</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Contraintes ergonomiques filtrées */}
+                  <div className="bg-[#151921] p-5 rounded-xl border border-white/5 space-y-3">
+                    <h4 className="text-xs font-bold text-white uppercase tracking-wider font-mono flex items-center gap-2">
+                      <Sliders className="w-4 h-4 text-purple-400" />
+                      Contraintes ergonomiques — {selectedUnit === "all" ? "Tous postes" : selectedUnit}
+                    </h4>
+                    <div className="space-y-1.5">
+                      {enterpriseSheet.ergonomicConstraints.filter(filterRiskByUnit).map((r, i) => (
+                        <div key={i} className="flex items-start gap-2 py-1.5 border-b border-white/5">
+                          <div className="flex gap-1 shrink-0 mt-0.5">
+                            {r.administrative && <span className="text-[9px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1 rounded font-mono">ADM</span>}
+                            {r.production && <span className="text-[9px] bg-orange-500/10 text-orange-400 border border-orange-500/20 px-1 rounded font-mono">PRO</span>}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <span className="text-xs font-semibold text-slate-200">{r.riskName}</span>
+                            {r.comment && <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">{r.comment}</p>}
+                          </div>
+                        </div>
+                      ))}
+                      {enterpriseSheet.ergonomicConstraints.filter(filterRiskByUnit).length === 0 && (
+                        <p className="text-xs text-slate-500 italic">Aucune contrainte ergonomique pour cette unité.</p>
+                      )}
+                    </div>
+
+                    {/* EPI, formations, sécurité — sans filtre unité (transversaux) */}
+                    <div className="pt-3 border-t border-white/5 space-y-3">
+                      {[
+                        { title: "EPI", data: enterpriseSheet.individualProtections, icon: <HardHat className="w-3.5 h-3.5 text-amber-400" /> },
+                        { title: "Formations", data: enterpriseSheet.safetyTraining, icon: <BookOpen className="w-3.5 h-3.5 text-violet-400" /> },
+                        { title: "Sécurité", data: enterpriseSheet.safetyMeasures, icon: <ShieldAlert className="w-3.5 h-3.5 text-blue-400" /> },
+                      ].map(({ title, data, icon }) => (
+                        <div key={title}>
+                          <p className="text-[9px] font-bold text-slate-500 font-mono uppercase flex items-center gap-1 mb-1.5">{icon}{title}</p>
+                          <div className="space-y-1">
+                            {data.map((e, i) => (
+                              <div key={i} className="flex items-center justify-between gap-2 text-[11px]">
+                                <span className="text-slate-300 flex-1">{e.item}</span>
+                                <ComplianceBadge status={e.status} />
                               </div>
-                              {c.comment && <p className="text-[10px] text-slate-500 mt-1">{c.comment}</p>}
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── SECTION COMPARAISON DUERP ── */}
+                <div className="bg-[#151921] rounded-xl border border-white/5 overflow-hidden">
+                  <div className="p-5 border-b border-white/5">
+                    <h4 className="text-sm font-bold text-white uppercase tracking-wider font-mono flex items-center gap-2">
+                      <ClipboardList className="w-5 h-5 text-violet-400" />
+                      Vérification d'un autre DUERP par rapport à cette référence
+                    </h4>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Importez un autre DUERP ci-dessous. Le logiciel vérifiera item par item s'il contient bien tous les éléments de la fiche de référence, poste par poste.
+                    </p>
+                  </div>
+
+                  <div className="p-5 space-y-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[9px] font-bold text-slate-400 font-mono uppercase tracking-widest">Texte du DUERP à vérifier</label>
+                      <div className="flex items-center gap-2 mb-1">
+                        <input
+                          type="file"
+                          id="duerp-upload"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (!f) return;
+                            setDuerpFileName(f.name);
+                            const reader = new FileReader();
+                            reader.onload = (ev) => setDuerpText(ev.target?.result as string);
+                            reader.readAsText(f);
+                          }}
+                          className="hidden"
+                          accept=".txt,.doc,.docx,.pdf,.csv"
+                        />
+                        <label htmlFor="duerp-upload" className="text-[10px] font-bold font-mono uppercase text-slate-400 bg-[#0F1117] border border-white/10 px-3 py-1.5 rounded cursor-pointer hover:text-slate-200 transition">
+                          📂 Charger un fichier
+                        </label>
+                        {duerpFileName && <span className="text-[10px] text-violet-400 font-mono">{duerpFileName}</span>}
+                      </div>
+                      <textarea
+                        value={duerpText}
+                        onChange={(e) => setDuerpText(e.target.value)}
+                        placeholder="Ou collez ici le texte du DUERP à analyser..."
+                        rows={5}
+                        className="w-full bg-[#0F1117] border border-white/10 rounded-lg p-3 text-xs font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-violet-500 transition"
+                      />
+                    </div>
+
+                    {duerpError && (
+                      <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded text-xs flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 shrink-0" /><p>{duerpError}</p>
+                      </div>
+                    )}
+
+                    <button
+                      onClick={handleDuerpCompare}
+                      disabled={isDuerpComparing || !duerpText.trim()}
+                      className="bg-violet-600 hover:bg-violet-500 text-white font-bold font-mono text-xs uppercase tracking-widest py-2.5 px-6 rounded-lg flex items-center gap-2 transition disabled:opacity-50 cursor-pointer"
+                    >
+                      {isDuerpComparing ? <><RefreshCw className="animate-spin w-4 h-4" /><span>Analyse en cours...</span></> : <><ClipboardList className="w-4 h-4" /><span>Lancer la vérification par rapport à la référence</span></>}
+                    </button>
+                  </div>
+
+                  {/* Résultats comparaison */}
+                  {duerpComparison && (
+                    <div className="border-t border-white/5 p-5 space-y-5">
+                      {/* Score global */}
+                      <div className="flex items-center justify-between gap-4">
+                        <div>
+                          <p className="text-[9px] font-mono text-slate-500 uppercase tracking-widest">Taux de couverture global</p>
+                          <p className="text-3xl font-black mt-1" style={{ color: duerpComparison.globalCoverage >= 75 ? '#10b981' : duerpComparison.globalCoverage >= 50 ? '#f59e0b' : '#ef4444' }}>
+                            {duerpComparison.globalCoverage}%
+                          </p>
+                          <p className="text-[10px] text-slate-500 font-mono">{duerpComparison.analyzedFileName} vs {duerpComparison.referenceName}</p>
+                        </div>
+                        <div className="flex-1 bg-[#0F1117] rounded-full h-3 overflow-hidden">
+                          <div
+                            className="h-full rounded-full transition-all"
+                            style={{
+                              width: `${duerpComparison.globalCoverage}%`,
+                              backgroundColor: duerpComparison.globalCoverage >= 75 ? '#10b981' : duerpComparison.globalCoverage >= 50 ? '#f59e0b' : '#ef4444'
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      <p className="text-xs text-slate-300 leading-relaxed bg-[#0F1117] p-3 rounded-lg border border-white/5 italic">
+                        {duerpComparison.summary}
+                      </p>
+
+                      {/* Résultats par unité */}
+                      <div className="space-y-4">
+                        {duerpComparison.units.map((unit, ui) => (
+                          <div key={ui} className="bg-[#0F1117] rounded-xl border border-white/5 overflow-hidden">
+                            <div className="flex items-center justify-between px-4 py-3 bg-[#151921] border-b border-white/5">
+                              <h5 className="text-xs font-bold text-white uppercase font-mono">{unit.unit}</h5>
+                              <span className={`text-[10px] font-bold font-mono px-2 py-0.5 rounded border ${
+                                unit.coveragePercent >= 75 ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
+                                unit.coveragePercent >= 50 ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
+                                "bg-red-500/10 text-red-400 border-red-500/20"
+                              }`}>{unit.coveragePercent}% couvert</span>
                             </div>
-                          ))}
-                        </div>
-                      )
-                    }
-                  </div>
-                </div>
 
-                {/* Risques physiques & ergonomiques */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  <div className="bg-[#151921] p-5 rounded-xl border border-white/5 space-y-3">
-                    <h4 className="text-xs font-bold text-white uppercase tracking-wider font-mono">⚡ Risques Physiques & Chimiques</h4>
-                    <div className="space-y-1.5">
-                      {[...enterpriseSheet.physicalRisks, ...enterpriseSheet.chemicalRisks, ...enterpriseSheet.infectiousRisks].map((r, i) => (
-                        <div key={i} className="flex items-start gap-2 text-xs py-1.5 border-b border-white/5">
-                          <div className="flex gap-1 shrink-0 mt-0.5">
-                            {r.administrative && <span className="text-[9px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1 rounded font-mono">ADM</span>}
-                            {r.production && <span className="text-[9px] bg-orange-500/10 text-orange-400 border border-orange-500/20 px-1 rounded font-mono">PRO</span>}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <span className="font-semibold text-slate-200">{r.riskName}</span>
-                            {r.comment && <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">{r.comment}</p>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-0 divide-y md:divide-y-0 md:divide-x divide-white/5">
+                              {/* Présent */}
+                              {unit.coveredItems.length > 0 && (
+                                <div className="p-4 space-y-1.5">
+                                  <p className="text-[9px] font-bold text-emerald-400 font-mono uppercase flex items-center gap-1">
+                                    <CheckCircle className="w-3 h-3" /> Traités ({unit.coveredItems.length})
+                                  </p>
+                                  {unit.coveredItems.map((item, i) => (
+                                    <p key={i} className="text-[11px] text-slate-300 flex items-start gap-1.5">
+                                      <span className="text-emerald-500 shrink-0 mt-0.5">✓</span>{item}
+                                    </p>
+                                  ))}
+                                </div>
+                              )}
 
-                  <div className="bg-[#151921] p-5 rounded-xl border border-white/5 space-y-3">
-                    <h4 className="text-xs font-bold text-white uppercase tracking-wider font-mono">🏋️ Contraintes Ergonomiques</h4>
-                    <div className="space-y-1.5">
-                      {enterpriseSheet.ergonomicConstraints.map((r, i) => (
-                        <div key={i} className="flex items-start gap-2 text-xs py-1.5 border-b border-white/5">
-                          <div className="flex gap-1 shrink-0 mt-0.5">
-                            {r.administrative && <span className="text-[9px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1 rounded font-mono">ADM</span>}
-                            {r.production && <span className="text-[9px] bg-orange-500/10 text-orange-400 border border-orange-500/20 px-1 rounded font-mono">PRO</span>}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <span className="font-semibold text-slate-200">{r.riskName}</span>
-                            {r.comment && <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">{r.comment}</p>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {/* EPI & Conformités */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  {[
-                    { title: "EPI — Protections Individuelles", data: enterpriseSheet.individualProtections, icon: <HardHat className="w-4 h-4 text-amber-400" /> },
-                    { title: "Sécurité & Prévention", data: enterpriseSheet.safetyMeasures, icon: <ShieldAlert className="w-4 h-4 text-blue-400" /> },
-                    { title: "Formations Sécurité", data: enterpriseSheet.safetyTraining, icon: <BookOpen className="w-4 h-4 text-violet-400" /> },
-                  ].map(({ title, data, icon }) => (
-                    <div key={title} className="bg-[#151921] p-5 rounded-xl border border-white/5 space-y-3">
-                      <h4 className="text-xs font-bold text-white uppercase tracking-wider font-mono flex items-center gap-2">{icon}{title}</h4>
-                      <div className="space-y-1.5">
-                        {data.map((e, i) => (
-                          <div key={i} className="flex items-center justify-between gap-2 text-[11px] py-1 border-b border-white/5">
-                            <span className="text-slate-300 flex-1">{e.item}</span>
-                            <ComplianceBadge status={e.status} />
+                              {/* Manquants */}
+                              <div className="p-4 space-y-2">
+                                {unit.missingItems.length > 0 && (
+                                  <div className="space-y-1.5">
+                                    <p className="text-[9px] font-bold text-red-400 font-mono uppercase flex items-center gap-1">
+                                      <XCircle className="w-3 h-3" /> Absents ({unit.missingItems.length})
+                                    </p>
+                                    {unit.missingItems.map((item, i) => (
+                                      <p key={i} className="text-[11px] text-slate-300 flex items-start gap-1.5">
+                                        <span className="text-red-400 shrink-0 mt-0.5">✗</span>{item}
+                                      </p>
+                                    ))}
+                                  </div>
+                                )}
+                                {unit.partialItems.length > 0 && (
+                                  <div className="space-y-1.5 mt-2">
+                                    <p className="text-[9px] font-bold text-amber-400 font-mono uppercase flex items-center gap-1">
+                                      <AlertCircle className="w-3 h-3" /> Incomplets ({unit.partialItems.length})
+                                    </p>
+                                    {unit.partialItems.map((item, i) => (
+                                      <p key={i} className="text-[11px] text-slate-300 flex items-start gap-1.5">
+                                        <span className="text-amber-400 shrink-0 mt-0.5">⚠</span>{item}
+                                      </p>
+                                    ))}
+                                  </div>
+                                )}
+                                {unit.additionalItems.length > 0 && (
+                                  <div className="space-y-1.5 mt-2">
+                                    <p className="text-[9px] font-bold text-blue-400 font-mono uppercase flex items-center gap-1">
+                                      <Info className="w-3 h-3" /> Spécifiques à ce DUERP ({unit.additionalItems.length})
+                                    </p>
+                                    {unit.additionalItems.map((item, i) => (
+                                      <p key={i} className="text-[11px] text-slate-300 flex items-start gap-1.5">
+                                        <span className="text-blue-400 shrink-0 mt-0.5">+</span>{item}
+                                      </p>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         ))}
                       </div>
                     </div>
-                  ))}
+                  )}
                 </div>
 
-                {/* CTA : aller analyser les postes extraits */}
+                {/* CTA postes extraits */}
                 {enterpriseSheet.extractedWorkstations && enterpriseSheet.extractedWorkstations.length > 0 && (
-                  <div className="bg-violet-500/10 border border-violet-500/30 rounded-xl p-5 flex items-center justify-between gap-4">
+                  <div className="bg-violet-500/10 border border-violet-500/30 rounded-xl p-4 flex items-center justify-between gap-4">
                     <div>
-                      <p className="text-xs font-bold text-violet-300 uppercase font-mono tracking-wider">{enterpriseSheet.extractedWorkstations.length} poste(s) déduit(s) automatiquement</p>
-                      <p className="text-xs text-slate-400 mt-0.5">Les postes ont été ajoutés au sélecteur. Vous pouvez maintenant lancer l'analyse bayésienne ou ergonomique.</p>
+                      <p className="text-xs font-bold text-violet-300 uppercase font-mono tracking-wider">{enterpriseSheet.extractedWorkstations.length} poste(s) injecté(s) dans l'analyse</p>
+                      <p className="text-xs text-slate-400 mt-0.5">Disponibles dans le sélecteur de postes pour l'analyse bayésienne et ergonomique.</p>
                     </div>
-                    <button
-                      onClick={() => setActiveTab("bayesian")}
-                      className="shrink-0 bg-violet-600 hover:bg-violet-500 text-white font-bold font-mono text-xs uppercase tracking-wider py-2.5 px-5 rounded-lg flex items-center gap-2 transition cursor-pointer"
-                    >
-                      <TrendingUp className="w-4 h-4" />
-                      Analyser l'exposition
+                    <button onClick={() => setActiveTab("bayesian")} className="shrink-0 bg-violet-600 hover:bg-violet-500 text-white font-bold font-mono text-xs uppercase tracking-wider py-2.5 px-5 rounded-lg flex items-center gap-2 transition cursor-pointer">
+                      <TrendingUp className="w-4 h-4" />Analyser l'exposition
                     </button>
                   </div>
                 )}
 
               </div>
-            )}
+              );
+            })()}
           </motion.div>
         )}
 

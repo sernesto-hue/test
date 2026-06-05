@@ -757,6 +757,114 @@ Ne renvoyez que le JSON valide, sans blocs d'enrobage.
   }
 });
 
+// ─── Comparaison DUERP vs FE de référence ────────────────────────────────────
+app.post("/api/compare-duerp", async (req: express.Request, res: express.Response): Promise<void> => {
+  try {
+    const { referenceSheet, duerpText, duerpFileName } = req.body;
+    if (!referenceSheet || !duerpText) {
+      res.status(400).json({ error: "Fiche de référence et texte du DUERP requis." });
+      return;
+    }
+    const aiClient = getGeminiClient();
+
+    // Construire une checklist exhaustive depuis la FE de référence
+    const referenceChecklist = buildReferenceChecklist(referenceSheet);
+
+    const prompt = `
+Vous êtes un expert en prévention des risques professionnels chargé d'évaluer la complétude d'un Document Unique d'Évaluation des Risques (DUERP) par rapport à une Fiche d'Entreprise de référence.
+
+=== FICHE D'ENTREPRISE DE RÉFÉRENCE (checklist complète) ===
+Entreprise de référence : ${referenceSheet.company?.name || "inconnue"} — Activité : ${referenceSheet.company?.activity || ""}
+
+Unités et effectifs de référence :
+${referenceChecklist.units.join("\n")}
+
+Risques physiques référencés (par unité) :
+${referenceChecklist.physicalRisks.join("\n")}
+
+Risques chimiques et produits référencés :
+${referenceChecklist.chemicalRisks.join("\n")}
+
+Contraintes ergonomiques référencées :
+${referenceChecklist.ergonomicItems.join("\n")}
+
+EPI et protections référencés :
+${referenceChecklist.epiItems.join("\n")}
+
+Formations référencées :
+${referenceChecklist.trainingItems.join("\n")}
+
+Mesures de sécurité référencées :
+${referenceChecklist.safetyItems.join("\n")}
+
+=== DUERP À ANALYSER ===
+Fichier : ${duerpFileName || "document fourni"}
+
+${duerpText}
+
+=== MISSION ===
+Pour chaque unité fonctionnelle ou poste identifié dans le DUERP analysé, comparez point par point avec la checklist de référence ci-dessus.
+Identifiez pour chaque unité :
+1. Les items de la checklist de référence qui sont bien présents et traités dans ce DUERP
+2. Les items de la checklist de référence qui sont ABSENTS ou non traités dans ce DUERP
+3. Les items évoqués mais insuffisamment détaillés (ex: risque mentionné sans évaluation ni mesure)
+4. Les risques supplémentaires présents dans ce DUERP et absents de la référence (spécificités du secteur)
+
+Répondez UNIQUEMENT en JSON valide selon ce format :
+{
+  "analyzedFileName": "${duerpFileName || "document"}",
+  "referenceName": "${referenceSheet.company?.name || "FE de référence"}",
+  "globalCoverage": 75,
+  "summary": "Synthèse factuelle en 3-4 phrases sur la qualité et complétude du DUERP analysé par rapport à la référence.",
+  "units": [
+    {
+      "unit": "Nom exact de l'unité ou du poste (ex: Atelier de production, Bureaux administratifs)",
+      "coveredItems": ["Item bien présent et traité", "..."],
+      "missingItems": ["Item absent du DUERP", "..."],
+      "partialItems": ["Item évoqué mais insuffisant", "..."],
+      "additionalItems": ["Risque supplémentaire spécifique à cette entreprise", "..."],
+      "coveragePercent": 80
+    }
+  ]
+}
+`;
+
+    const response = await generateContentWithRetry(aiClient, {
+      model: "gemini-3.5-flash",
+      contents: prompt,
+      config: { responseMimeType: "application/json", maxOutputTokens: 8192 },
+    });
+
+    let resultJson = (response.text || "{}").trim();
+    if (resultJson.startsWith("```json")) resultJson = resultJson.substring(7);
+    if (resultJson.startsWith("```")) resultJson = resultJson.substring(3);
+    if (resultJson.endsWith("```")) resultJson = resultJson.slice(0, -3);
+
+    res.json(JSON.parse(resultJson.trim()));
+  } catch (error: any) {
+    console.error("Compare DUERP error:", error);
+    res.status(500).json({ error: error.message || "Erreur lors de la comparaison." });
+  }
+});
+
+function buildReferenceChecklist(fe: any) {
+  const units = (fe.staff || []).map((s: any) => `- ${s.unit} : ${s.jobTitle} (${s.total} pers.)`);
+  const physicalRisks = (fe.physicalRisks || []).map((r: any) =>
+    `- [${r.administrative ? "ADM" : ""}${r.production ? "/PRO" : ""}] ${r.riskName} : ${r.comment}`
+  );
+  const chemicalRisks = [
+    ...(fe.chemicalRisks || []).map((r: any) => `- ${r.riskName} : ${r.comment}`),
+    ...(fe.observedChemicals || []).map((c: any) => `- Produit ${c.hazardClass} : ${c.name} — ${c.comment}`),
+  ];
+  const ergonomicItems = (fe.ergonomicConstraints || []).map((r: any) =>
+    `- [${r.administrative ? "ADM" : ""}${r.production ? "/PRO" : ""}] ${r.riskName} : ${r.comment}`
+  );
+  const epiItems = (fe.individualProtections || []).map((e: any) => `- ${e.item} (${e.status})`);
+  const trainingItems = (fe.safetyTraining || []).map((e: any) => `- ${e.item} (${e.status})`);
+  const safetyItems = (fe.safetyMeasures || []).map((e: any) => `- ${e.item} (${e.status})`);
+  return { units, physicalRisks, chemicalRisks, ergonomicItems, epiItems, trainingItems, safetyItems };
+}
+
 // ─── Consultation références INRS ────────────────────────────────────────────
 app.post("/api/inrs-lookup", async (req: express.Request, res: express.Response): Promise<void> => {
   try {

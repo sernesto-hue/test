@@ -115,6 +115,25 @@ export interface BayesianAnalysisResult {
 
 export type ComplianceStatus = "oui" | "non" | "à améliorer" | "à prévoir" | "à s'assurer";
 
+// ─── Analyse comparative DUERP ───────────────────────────────────────────────
+
+export interface DuerpUnitGap {
+  unit: string;           // Nom de l'unité (ex: "Atelier de production")
+  coveredItems: string[]; // Risques présents dans le DUERP analysé
+  missingItems: string[]; // Risques présents dans la FE de référence mais absents du DUERP
+  partialItems: string[]; // Risques évoqués mais insuffisamment détaillés
+  additionalItems: string[]; // Risques supplémentaires trouvés dans le DUERP (non dans la FE)
+  coveragePercent: number;
+}
+
+export interface DuerpComparisonResult {
+  analyzedFileName: string;
+  referenceName: string;
+  globalCoverage: number;
+  summary: string;
+  units: DuerpUnitGap[];
+}
+
 export interface StaffEntry {
   unit: string;       // Unité fonctionnelle (ex: "Atelier de production")
   jobTitle: string;   // Fonction (ex: "Agent de production")
