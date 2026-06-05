@@ -339,7 +339,7 @@ app.post("/api/analyze-documents", async (req: express.Request, res: express.Res
     // Direct text instructions / raw text input
     let promptText = `
 Vous êtes un ingénieur expert en hygiène industrielle, toxicologie et prévention des risques professionnels (médecine du travail en France).
-Votre mission est d'analyser le texte ou le document d'une Fiche de Données de Sécurité (FDS) et de le confronter éventuellement avec des éléments d'un "Document Unique d'Évaluation des Risques" (DUERP) s'ils sont présents dans les données fournies.
+Votre mission est d'analyser le texte ou le document fourni (FDS, DUERP, Fiche de Poste, Fiche d'Entreprise, rapport d'inspection...) et d'en extraire TOUS les produits chimiques présents.
 
 Voici les données textuelles fournies :
 --- DÉBUT DES DONNÉES DOCUMENTAIRES ---
@@ -347,62 +347,65 @@ ${text || "(Document fourni en pièce jointe d'analyses multimodales)"}
 ${fileName ? `Nom du fichier : ${fileName}` : ""}
 --- FIN DES DONNÉES DOCUMENTAIRES ---
 
-Consignes d'extraction obligatoires :
-1. Postes ou Situations de Travail : Identifiez les situations ou postes de travail cités dans le Document Unique ou déduisez logiquement les postes concernés si c'est une Fiche de Données de Sécurité pure. Pour chaque poste, précisez le titre de poste ou la qualification professionnelle (ex: "Peintre industriel", "Opérateur de stratification", "Mécanicien automobile", "Technicien de laboratoire").
-2. Agents Chimiques Présents : Extrayez les substances dangereuses (Nom, Numéro CAS, Pourcentage approximatif ou concentration, Phrases H de danger ex: H350, H340, H315, H373, pictogrammes pertinents).
-3. Pour chaque poste identifié, déterminez si :
-   - Des charges lourdes sont manipulées, levées ou portées (ce qui déclencherait l'application de la norme ergonomique ISO 11228-1). Si c'est le cas, proposez des valeurs de masse par défaut réalistes de charges soulevées (ex: 15 kg ou 20 kg).
-   - Du travail répétitif à haute fréquence est présent (déclenchant la norme ISO 11228-3).
-4. Pour chaque substance, associez les valeurs limites françaises de l'INRS (VLEP-8h et VLCT-15min) et suggérez les examens complémentaires obligatoires de surveillance médicale selon l'INRS BIOTOX et METROPOL (biométrologie urinaire ou sanguine).
+RÈGLE ABSOLUE N°1 — EXHAUSTIVITÉ CHIMIQUE :
+Extrayez ABSOLUMENT TOUS les produits chimiques mentionnés dans le document, sans aucune exception :
+- Substances pures (solvants, métaux, acides, bases...)
+- Mélanges commerciaux avec leur NOM DE MARQUE (ex: KLEIBERIT, SAT'OLEO, Sikaflex, Isoflex, U1-7...)
+- Produits de nettoyage, dégraissants, détergents
+- Huiles, lubrifiants, graisses
+- Colles, résines, durcisseurs, catalyseurs
+- Flux de brasage, décapants, fondants
+- Peintures, vernis, apprêts, primaires
+- Gaz, vapeurs, aérosols cités
+- Poussières spécifiques (bambou, bois, métal, silice...)
+- Tout produit avec ou sans numéro CAS, classifié ou non CMR
 
-Vous DEVEZ répondre STRICTEMENT sous la forme d'un objet JSON respectant le format TypeScript suivant :
+Ne filtrez PAS les produits selon leur dangerosité — incluez tous les produits cités même sans phrases H.
+
+RÈGLE N°2 — POSTES DE TRAVAIL :
+Identifiez chaque poste ou unité de travail et précisez son titre/qualification.
+Pour chaque poste, ne mettez liftingHandled/repetitiveWork à true QUE si le document le mentionne explicitement.
+Ne remplissez liftingParams et repetitiveParams QUE si des valeurs numériques figurent dans le document — sinon null.
+
+RÈGLE N°3 — VLEP ET BIOTOX :
+Pour vlep8h/vlep15min : mettre 0 si absent du document (ne pas inventer).
+Pour biotoxInfo/metropolInfo : renseigner uniquement si vous êtes certain (substances courantes INRS), sinon null.
+
+Répondez STRICTEMENT en JSON valide selon ce format :
 {
   "workstations": [
     {
-      "id": "un_id_court_unique",
-      "name": "Nom du poste de travail ou de l'atelier",
-      "jobTitle": "Titre du poste / qualification (ex: Peintre industriel, Sableur, Opérateur de ligne)",
-      "situation": "Description détaillée de la situation d'exposition de travail",
+      "id": "id_court_unique",
+      "name": "Nom de l'atelier ou du poste",
+      "jobTitle": "Qualification ou titre de poste",
+      "situation": "Description factuelle de l'exposition",
       "chemicals": [
         {
-          "name": "Nom chimique exact",
-          "cas": "Numéro CAS",
-          "percentage": "Pourcentage ou plage (ex: 5-10%)",
-          "hPhrases": ["H...", "H..."],
-          "pictograms": ["GHS02", "GHS07", "GHS08"], // codes pictogrammes standard
-          "vlep8h": 0.0, // valeur en mg/m³ ou ppm si trouvé, sinon mettre 0.0
-          "vlep15min": 0.0, // ou 0.0
-          "unit": "mg/m³ ou ppm",
-          "biotoxInfo": {
-            "indicator": "Nom du bio-indicateur à doser",
-            "samplingTime": "Moment du prélèvement (ex: Fin de poste)",
-            "limitValue": "Valeur limite biologique (ex: x µg/g créatinine)",
-            "category": "Classification / Commentaires"
-          },
-          "metropolInfo": {
-            "methodNumber": "Référence de la méthode Métropol ex: M-103",
-            "samplingSupport": "Support de prélèvement recommandé",
-            "device": "Technique analytique recommandée"
-          }
+          "name": "Nom exact du produit (commercial ou IUPAC)",
+          "cas": "CAS si disponible, sinon chaîne vide",
+          "percentage": "Concentration ou usage si mentionné, sinon vide",
+          "hPhrases": ["H..."],
+          "pictograms": ["GHS..."],
+          "vlep8h": 0.0,
+          "vlep15min": 0.0,
+          "unit": "mg/m³",
+          "biotoxInfo": null,
+          "metropolInfo": null
         }
       ],
       "physicalStrains": {
-        "liftingHandled": true_ou_false, // true UNIQUEMENT si le document mentionne explicitement une manutention ou port de charge
-        "repetitiveWork": true_ou_false, // true UNIQUEMENT si le document mentionne explicitement des gestes répétitifs
-        "pushPullHandled": true_ou_false,
-        "liftingParams": null // Laisser null — ne jamais inventer des paramètres non présents dans le document
+        "liftingHandled": false,
+        "repetitiveWork": false,
+        "pushPullHandled": false,
+        "liftingParams": null,
+        "repetitiveParams": null
       }
     }
   ]
 }
 
-RÈGLES STRICTES :
-- N'inventez AUCUNE valeur numérique (poids, fréquence, distance, angle) qui ne figure pas dans le document.
-- Pour liftingParams et repetitiveParams : mettre null si les valeurs ne sont pas explicitement mentionnées dans le document.
-- Pour vlep8h et vlep15min : utiliser uniquement les valeurs présentes dans la FDS, sinon mettre 0.
-- Pour biotoxInfo et metropolInfo : utiliser uniquement les références INRS connues avec certitude (Benzène, Toluène, Styrène, Plomb, Silice, Xylène, Acétone...), sinon mettre null.
-- Ne renvoyez que le JSON valide, sans texte autour.
-`;
+Ne renvoyez que le JSON valide. Pas de commentaires, pas de texte autour du JSON.`;
+
 
     contentInput.push({ text: promptText });
 
@@ -411,20 +414,32 @@ RÈGLES STRICTES :
       contents: contentInput,
       config: {
         responseMimeType: "application/json",
+        maxOutputTokens: 8192,
       },
     });
 
-    let resultJson = response.text || "{}";
-    
-    // Clean up response if it has been backticked as markdown json
-    if (resultJson.startsWith("```json")) {
-      resultJson = resultJson.substring(7);
+    let resultJson = (response.text || "{}").trim();
+    if (resultJson.startsWith("```json")) resultJson = resultJson.substring(7);
+    if (resultJson.startsWith("```")) resultJson = resultJson.substring(3);
+    if (resultJson.endsWith("```")) resultJson = resultJson.slice(0, -3);
+    resultJson = resultJson.trim();
+
+    // Récupération si le JSON est tronqué (fermeture manquante)
+    if (!resultJson.endsWith("}") && !resultJson.endsWith("]")) {
+      console.warn("[FDS] JSON potentiellement tronqué — tentative de réparation");
+      // Fermer les tableaux/objets ouverts
+      const opens = (resultJson.match(/\[|\{/g) || []).length;
+      const closes = (resultJson.match(/\]|\}/g) || []).length;
+      for (let i = 0; i < opens - closes; i++) resultJson += (i % 2 === 0 ? "]" : "}");
     }
-    if (resultJson.endsWith("```")) {
-      resultJson = resultJson.substring(0, resultJson.length - 3);
+
+    let parsedData: any;
+    try {
+      parsedData = JSON.parse(resultJson);
+    } catch (parseErr) {
+      console.error("[FDS] Impossible de parser le JSON:", parseErr);
+      throw new Error("La réponse de l'IA n'est pas un JSON valide. Essayez avec un document plus court ou en plusieurs parties.");
     }
-    
-    const parsedData = JSON.parse(resultJson.trim());
 
     // Post-process the extracted data: cross-reference with our highly reliable CHEMICAL_REFERENTIAL
     // to fill in any gaps left by the LLM (like exact BIOTOX recommendations, METROPOL references)
@@ -606,14 +621,28 @@ Ne renvoyez que le JSON valide, sans texte autour.
     const response = await generateContentWithRetry(aiClient, {
       model: "gemini-3.5-flash",
       contents: contentInput,
-      config: { responseMimeType: "application/json" },
+      config: { responseMimeType: "application/json", maxOutputTokens: 8192 },
     });
 
-    let resultJson = response.text || "{}";
+    let resultJson = (response.text || "{}").trim();
     if (resultJson.startsWith("```json")) resultJson = resultJson.substring(7);
-    if (resultJson.endsWith("```")) resultJson = resultJson.substring(0, resultJson.length - 3);
+    if (resultJson.startsWith("```")) resultJson = resultJson.substring(3);
+    if (resultJson.endsWith("```")) resultJson = resultJson.slice(0, -3);
+    resultJson = resultJson.trim();
 
-    const parsed = JSON.parse(resultJson.trim());
+    if (!resultJson.endsWith("}") && !resultJson.endsWith("]")) {
+      console.warn("[FE] JSON potentiellement tronqué — tentative de réparation");
+      const opens = (resultJson.match(/\[|\{/g) || []).length;
+      const closes = (resultJson.match(/\]|\}/g) || []).length;
+      for (let i = 0; i < opens - closes; i++) resultJson += (i % 2 === 0 ? "]" : "}");
+    }
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(resultJson);
+    } catch {
+      throw new Error("La réponse de l'IA n'est pas un JSON valide. Essayez avec un document plus court.");
+    }
 
     // Cross-reference extracted chemicals with CHEMICAL_REFERENTIAL
     if (parsed.extractedWorkstations) {
