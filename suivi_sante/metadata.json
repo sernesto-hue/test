@@ -1,0 +1,6 @@
+{
+  "name": "Suivi et Surveillance de Sante au Travail",
+  "description": "Logiciel d'aide pour medecins du travail permettant de croiser fiche d'entreprise, DUERP et FDS afin de generer le suivi medical approprie (SIG, SIA, SIR), examens cliniques et biomonitoring.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

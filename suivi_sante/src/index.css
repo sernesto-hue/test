@@ -1,0 +1,63 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* @media print styles designed to produce pristine legal PDF exports */
+@media print {
+  body {
+    background-color: white !important;
+    color: black !important;
+    font-size: 11pt !important;
+  }
+
+  /* Hide navigation, filters, banners, buttons, reset triggers */
+  .no-print,
+  #demo-mode-alert-banner,
+  #navigation-tabs-bar,
+  #main-application-header,
+  #duerp-unit-tabs,
+  #report-surveillance-container > div:nth-child(2), /* search/filters banner */
+  button,
+  form,
+  input,
+  select,
+  textarea {
+    display: none !important;
+  }
+
+  /* Make sure background colors render in PDF printers */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Expand the main printable surface to take full legal widths */
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  /* Avoid cutting off table rows */
+  tr {
+    page-break-inside: avoid !important;
+  }
+
+  /* Ensure the company header looks like a proper corporate cover card */
+  .bg-white {
+    border-color: #cbd5e1 !important;
+    background-color: white !important;
+  }
+
+  /* Page structure margins and footer spacing */
+  @page {
+    size: A4 landscape;
+    margin: 1.5cm;
+  }
+}
+
